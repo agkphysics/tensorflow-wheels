@@ -1,7 +1,8 @@
 # TensorFlow Wheels
-This repository contains python linux wheels for TensorFlow. All of the
+This repository contains python linux wheels for TensorFlow. Most of the
 wheels are compiled using the settings from the
-[Archlinux PKGBUILDs](https://github.com/archlinux/svntogit-community/blob/packages/tensorflow/trunk/PKGBUILD).
+[Archlinux PKGBUILDs](https://github.com/archlinux/svntogit-community/blob/packages/tensorflow/trunk/PKGBUILD),
+while a few are compiled on an Ubuntu 20.04 system.
 
 | TF | Python | GPU | Compute | CUDA | cuDNN | AVX2 | MKL | TensorRT | File |
 |-|-|-|-|-|-|-|-|-|-|
