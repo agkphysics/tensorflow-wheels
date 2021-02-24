@@ -4,8 +4,7 @@ wheels are compiled using the settings from the
 [Archlinux PKGBUILDs](https://github.com/archlinux/svntogit-community/blob/packages/tensorflow/trunk/PKGBUILD),
 while a few are compiled on an Ubuntu 20.04 system.
 
-Each release page gives info about the SHA1 and MD5 checksums of the
-attached files.
+Each release page also has the checksums of the attached files.
 
 | TF | Python | GPU | CUDA | cuDNN | AVX2 | MKL | TensorRT | Links |
 |-|-|-|-|-|-|-|-|-|
