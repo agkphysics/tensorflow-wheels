@@ -15,3 +15,4 @@ Each release page also has the checksums of the attached files.
 | 2.4.0 [commit](https://github.com/tensorflow/tensorflow/commit/210cf0a0142af9d1bd21a7de82d5dd0afffc6c68) | 3.8 | :x: | :x: | :x: | :x: | :x: | :x: | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.4.0_nogpu_noavx_nomkl) |
 | 2.3.0 | 3.8 | 7.x | 11.0 | 8 | :heavy_check_mark: | :heavy_check_mark: | 7 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.3.0_gpu_cm7x_cuda110_cudnn8_avx2_mkl_trt7) |
 | 2.4.0 | 3.9 | 7.x | 11.2 | 8 | :heavy_check_mark: | :heavy_check_mark: | :x: | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.4.0_linux_gpu_py39_cm7x_cuda112_cudnn8_avx2_mkl) |
+| 2.10.0 | 3.8 | 5.2-8.7 | 11.7 | 8 | :heavy_check_mark: | :heavy_check_mark: | 8 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.10.0_gpu_cuda117_cudnn8_avx2_mkl_trt8) |
