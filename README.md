@@ -18,3 +18,4 @@ Each release page also has the checksums of the attached files.
 | 2.10.0 | 3.8 | 5.2-8.7 | 11.7 | 8 | :heavy_check_mark: | :heavy_check_mark: | 8 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.10.0_gpu_cuda117_cudnn8_avx2_mkl_trt8) |
 | 2.10.0 | 3.9 | 5.2-8.7 | 11.7 | 8 | :heavy_check_mark: | :heavy_check_mark: | 8 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.10.0_gpu_py39_cuda117_cudnn8_avx2_mkl_trt8) |
 | 2.10.0 | 3.10 | 5.2-8.7 | 11.7 | 8 | :heavy_check_mark: | :heavy_check_mark: | 8 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.10.0_gpu_py310_cuda117_cudnn8_avx2_mkl_trt8) |
+| 2.11.0 | 3.7-3.10 | 5.2-9.0 | 11.8 | 8 | :heavy_check_mark: | :heavy_check_mark: | 8 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.11.0_gpu_py3x_cuda118_cudnn8_avx2_mkl_trt8) |
