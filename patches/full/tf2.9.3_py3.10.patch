@@ -1,0 +1,59 @@
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+index f6416a7e571..002406cf9eb 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+@@ -52,16 +52,8 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+
+ #if NV_TENSORRT_MAJOR < 7
+ #error TensorRT version earlier than 7 is not supported.
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_1_0.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 1
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_1.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_2.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_8_0.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_8_2.inc"
++#elif NV_TENSORRT_MAJOR == 7 || NV_TENSORRT_MAJOR == 8
++#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_0.inc"
+ #else
+ #error This version of TensorRT is not supported.
+ #endif
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+index 87ba6d7f0ea..a0a11766cd3 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+@@ -52,16 +52,10 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+
+ #if NV_TENSORRT_MAJOR < 7
+ #error TensorRT version earlier than 7 is not supported.
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_1_0.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 1
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_1.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_2.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 0
++#elif NV_TENSORRT_MAJOR == 7
++#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_0.inc"
++#elif NV_TENSORRT_MAJOR == 8
+ #include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_8_0.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_8_2.inc"
+ #else
+ #error This version of TensorRT is not supported.
+ #endif
+diff --color -aur tensorflow-2.9.1-old/third_party/gpus/cuda_configure.bzl tensorflow-2.9.1-new/third_party/gpus/cuda_configure.bzl
+--- tensorflow-2.9.1-old/third_party/gpus/cuda_configure.bzl	2022-08-22 14:03:54.439731148 +0300
++++ tensorflow-2.9.1-new/third_party/gpus/cuda_configure.bzl	2022-08-22 14:07:09.479726331 +0300
+@@ -710,7 +716,7 @@
+         cuda_version_major = cuda_major,
+         cudart_version = cudart_version,
+         cublas_version = cublas_version,
+-        cusolver_version = cusolver_version,
++        cusolver_version = "11",
+         curand_version = curand_version,
+         cufft_version = cufft_version,
+         cusparse_version = cusparse_version,

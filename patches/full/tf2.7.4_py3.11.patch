@@ -1,0 +1,400 @@
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+index 5afb63807f1..002406cf9eb 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+@@ -52,14 +52,8 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+ 
+ #if NV_TENSORRT_MAJOR < 7
+ #error TensorRT version earlier than 7 is not supported.
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_1_0.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 1
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_1.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_2.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_8_0.inc"
++#elif NV_TENSORRT_MAJOR == 7 || NV_TENSORRT_MAJOR == 8
++#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_0.inc"
+ #else
+ #error This version of TensorRT is not supported.
+ #endif
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+index 04999d04766..a0a11766cd3 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+@@ -52,13 +52,9 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+ 
+ #if NV_TENSORRT_MAJOR < 7
+ #error TensorRT version earlier than 7 is not supported.
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_1_0.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 1
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_1.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_2.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 0
++#elif NV_TENSORRT_MAJOR == 7
++#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_0.inc"
++#elif NV_TENSORRT_MAJOR == 8
+ #include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_8_0.inc"
+ #else
+ #error This version of TensorRT is not supported.
+diff --git a/tensorflow/python/keras/utils/tf_inspect.py b/tensorflow/python/keras/utils/tf_inspect.py
+index fb88b6a922a..a1118644f38 100644
+--- a/tensorflow/python/keras/utils/tf_inspect.py
++++ b/tensorflow/python/keras/utils/tf_inspect.py
+@@ -20,7 +20,10 @@ import inspect as _inspect
+ 
+ from tensorflow.python.util import tf_decorator
+ 
+-ArgSpec = _inspect.ArgSpec
++try:
++  ArgSpec = _inspect.ArgSpec
++except:
++  pass
+ 
+ 
+ if hasattr(_inspect, 'FullArgSpec'):
+@@ -64,11 +67,21 @@ if hasattr(_inspect, 'getfullargspec'):
+       from FullArgSpec.
+     """
+     fullargspecs = getfullargspec(target)
+-    argspecs = ArgSpec(
+-        args=fullargspecs.args,
+-        varargs=fullargspecs.varargs,
+-        keywords=fullargspecs.varkw,
+-        defaults=fullargspecs.defaults)
++    if hasattr(_inspect, 'ArgSpec'):
++      argspecs = ArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          keywords=fullargspecs.varkw,
++          defaults=fullargspecs.defaults)
++    else:
++      argspecs = FullArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          varkw=fullargspecs.varkw,
++          defaults=fullargspecs.defaults,
++          kwonlyargs=[],
++          kwonlydefaults=None,
++          annotations={})
+     return argspecs
+ else:
+   _getargspec = _inspect.getargspec
+diff --git a/tensorflow/python/lib/core/bfloat16.cc b/tensorflow/python/lib/core/bfloat16.cc
+index bb2ae9d1b61..c0f4ff171cf 100644
+--- a/tensorflow/python/lib/core/bfloat16.cc
++++ b/tensorflow/python/lib/core/bfloat16.cc
+@@ -1346,7 +1346,11 @@ bool Initialize() {
+   NPyBfloat16_ArrFuncs.argmax = NPyBfloat16_ArgMaxFunc;
+   NPyBfloat16_ArrFuncs.argmin = NPyBfloat16_ArgMinFunc;
+ 
++#if PY_VERSION_HEX < 0x030900A4 && !defined(Py_SET_TYPE)
+   Py_TYPE(&NPyBfloat16_Descr) = &PyArrayDescr_Type;
++#else
++  Py_SET_TYPE(&NPyBfloat16_Descr, &PyArrayDescr_Type);
++#endif
+   npy_bfloat16 = PyArray_RegisterDataType(&NPyBfloat16_Descr);
+   bfloat16_type_ptr = &bfloat16_type;
+   if (npy_bfloat16 < 0) {
+diff --git a/tensorflow/python/profiler/internal/python_hooks.cc b/tensorflow/python/profiler/internal/python_hooks.cc
+index 676999f7713..153bd18e145 100644
+--- a/tensorflow/python/profiler/internal/python_hooks.cc
++++ b/tensorflow/python/profiler/internal/python_hooks.cc
+@@ -270,8 +270,14 @@ void PythonHookContext::ProfileFast(PyFrameObject* frame, int what,
+ 
+   switch (what) {
+     case PyTrace_CALL: {
++#if PY_VERSION_HEX < 0x030b0000
+       PyCodeObject* f_code = frame->f_code;
+       thread_traces.active.emplace(now, 0, f_code);
++#else   // PY_VERSION_HEX < 0x030b0000
++      PyCodeObject* f_code = PyFrame_GetCode(frame);
++      thread_traces.active.emplace(now, 0, f_code);
++      Py_XDECREF(f_code);
++#endif  // PY_VERSION_HEX < 0x030b0000
+       break;
+     }
+     case PyTrace_RETURN:
+@@ -282,8 +288,14 @@ void PythonHookContext::ProfileFast(PyFrameObject* frame, int what,
+         thread_traces.completed.emplace_back(std::move(entry));
+         thread_traces.active.pop();
+       } else if (options_.include_incomplete_events) {
++#if PY_VERSION_HEX < 0x030b0000
+         PyCodeObject* f_code = frame->f_code;
+         thread_traces.completed.emplace_back(start_timestamp_ns_, now, f_code);
++#else   // PY_VERSION_HEX < 0x030b0000
++        PyCodeObject* f_code = PyFrame_GetCode(frame);
++        thread_traces.completed.emplace_back(start_timestamp_ns_, now, f_code);
++        Py_XDECREF(f_code);
++#endif  // PY_VERSION_HEX < 0x030b0000
+       }
+       break;
+     }
+diff --git a/tensorflow/python/util/dispatch.py b/tensorflow/python/util/dispatch.py
+index 38fa809dd25..960358b531b 100644
+--- a/tensorflow/python/util/dispatch.py
++++ b/tensorflow/python/util/dispatch.py
+@@ -453,7 +453,12 @@ def _add_name_scope_wrapper(func, api_signature):
+ 
+   func_signature = tf_inspect.signature(func)
+   func_argspec = tf_inspect.getargspec(func)
+-  if "name" in func_signature.parameters or func_argspec.keywords is not None:
++  kw = None
++  if hasattr(func_argspec, 'keywords'):
++    kw = func_argspec.keywords
++  elif hasattr(func_argspec, 'varkw'):
++    kw = func_argspec.varkw
++  if "name" in func_signature.parameters or kw is not None:
+     return func  # No wrapping needed (already has name parameter).
+ 
+   name_index = list(api_signature.parameters).index("name")
+@@ -563,7 +568,12 @@ def add_type_based_api_dispatcher(target):
+ 
+   _, unwrapped = tf_decorator.unwrap(target)
+   target_argspec = tf_inspect.getargspec(unwrapped)
+-  if target_argspec.varargs or target_argspec.keywords:
++  kw = None
++  if hasattr(target_argspec, 'keywords'):
++    kw = target_argspec.keywords
++  elif hasattr(target_argspec, 'varkw'):
++    kw = target_argspec.varkw
++  if target_argspec.varargs or kw:
+     # @TODO(b/194903203) Add v2 dispatch support for APIs that take varargs
+     # and keywords.  Examples of APIs that take varargs and kwargs: meshgrid,
+     # einsum, map_values, map_flat_values.
+@@ -593,7 +603,12 @@ def _check_signature(api_signature, func):
+   """
+   # Special case: if func_signature is (*args, **kwargs), then assume it's ok.
+   func_argspec = tf_inspect.getargspec(func)
+-  if (func_argspec.varargs is not None and func_argspec.keywords is not None
++  kw = None
++  if hasattr(func_argspec, 'keywords'):
++    kw = func_argspec.keywords
++  elif hasattr(func_argspec, 'varkw'):
++    kw = func_argspec.varkw
++  if (func_argspec.varargs is not None and kw is not None
+       and not func_argspec.args):
+     return
+ 
+diff --git a/tensorflow/python/util/stack_trace.h b/tensorflow/python/util/stack_trace.h
+index 36f54f687bc..243be0e1074 100644
+--- a/tensorflow/python/util/stack_trace.h
++++ b/tensorflow/python/util/stack_trace.h
+@@ -61,14 +61,27 @@ class StackTrace final {
+     if (limit == -1) limit = std::numeric_limits<int>::max();
+ 
+     StackTrace result;
++#if PY_VERSION_HEX >= 0x030B0000
++    PyFrameObject* frame = PyThreadState_GetFrame(PyThreadState_GET());
++#else
+     const PyFrameObject* frame = PyThreadState_GET()->frame;
++#endif
+     int i = 0;
++#if PY_VERSION_HEX >= 0x030B0000
++    for (; i < limit && frame != nullptr; PyFrame_GetBack(frame), ++i) {
++      PyCodeObject* code_obj = PyFrame_GetCode(frame);
++#else
+     for (; i < limit && frame != nullptr; frame = frame->f_back, ++i) {
+       PyCodeObject* code_obj = frame->f_code;
++#endif
+       DCHECK(code_obj != nullptr);
+ 
+       Py_INCREF(code_obj);
++#if PY_VERSION_HEX >= 0x030B0000
++      result.code_objs_.push_back(std::make_pair(code_obj, PyFrame_GetLasti(frame)));
++#else
+       result.code_objs_.push_back(std::make_pair(code_obj, frame->f_lasti));
++#endif
+     }
+     return result;
+   }
+diff --git a/tensorflow/python/util/tf_inspect.py b/tensorflow/python/util/tf_inspect.py
+index ada6a314f69..2f20ae8776a 100644
+--- a/tensorflow/python/util/tf_inspect.py
++++ b/tensorflow/python/util/tf_inspect.py
+@@ -39,7 +39,10 @@ def signature(obj, *, follow_wrapped=True):
+ Parameter = _inspect.Parameter
+ Signature = _inspect.Signature
+ 
+-ArgSpec = _inspect.ArgSpec
++try:
++  ArgSpec = _inspect.ArgSpec
++except:
++  pass
+ 
+ 
+ if hasattr(_inspect, 'FullArgSpec'):
+@@ -83,11 +86,21 @@ if hasattr(_inspect, 'getfullargspec'):
+       from FullArgSpec.
+     """
+     fullargspecs = getfullargspec(target)
+-    argspecs = ArgSpec(
+-        args=fullargspecs.args,
+-        varargs=fullargspecs.varargs,
+-        keywords=fullargspecs.varkw,
+-        defaults=fullargspecs.defaults)
++    if hasattr(_inspect, 'ArgSpec'):
++      argspecs = ArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          keywords=fullargspecs.varkw,
++          defaults=fullargspecs.defaults)
++    else:
++      argspecs = FullArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          varkw=fullargspecs.varkw,
++          defaults=fullargspecs.defaults,
++          kwonlyargs=[],
++          kwonlydefaults=None,
++          annotations={})
+     return argspecs
+ else:
+   _getargspec = _inspect.getargspec
+diff --git a/tensorflow/workspace2.bzl b/tensorflow/workspace2.bzl
+index d2f37131a97..0f47cd5d8da 100644
+--- a/tensorflow/workspace2.bzl
++++ b/tensorflow/workspace2.bzl
+@@ -845,12 +845,12 @@ def _tf_repositories():
+     tf_http_archive(
+         name = "cython",
+         build_file = "//third_party:cython.BUILD",
+-        sha256 = "e2e38e1f0572ca54d6085df3dec8b607d20e81515fb80215aed19c81e8fe2079",
+-        strip_prefix = "cython-0.29.21",
++        sha256 = "08dbdb6aa003f03e65879de8f899f87c8c718cd874a31ae9c29f8726da2f5ab0",
++        strip_prefix = "cython-3.0.0a11",
+         system_build_file = "//third_party/systemlibs:cython.BUILD",
+         urls = [
+-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/cython/cython/archive/0.29.21.tar.gz",
+-            "https://github.com/cython/cython/archive/0.29.21.tar.gz",
++            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/cython/cython/archive/3.0.0a11.tar.gz",
++            "https://github.com/cython/cython/archive/3.0.0a11.tar.gz",
+         ],
+     )
+ 
+@@ -1039,25 +1039,24 @@ def _tf_repositories():
+     tf_http_archive(
+         name = "pybind11",
+         urls = [
+-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/pybind/pybind11/archive/v2.6.0.tar.gz",
+-            "https://github.com/pybind/pybind11/archive/v2.6.0.tar.gz",
++            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/pybind/pybind11/archive/v2.10.0.tar.gz",
++            "https://github.com/pybind/pybind11/archive/v2.10.0.tar.gz",
+         ],
+-        sha256 = "90b705137b69ee3b5fc655eaca66d0dc9862ea1759226f7ccd3098425ae69571",
+-        strip_prefix = "pybind11-2.6.0",
++        sha256 = "eacf582fa8f696227988d08cfc46121770823839fe9e301a20fbce67e7cd70ec",
++        strip_prefix = "pybind11-2.10.0",
+         build_file = "//third_party:pybind11.BUILD",
+-        patch_file = "//third_party:pybind11.patch",
+         system_build_file = "//third_party/systemlibs:pybind11.BUILD",
+     )
+ 
+     tf_http_archive(
+         name = "wrapt",
+         build_file = "//third_party:wrapt.BUILD",
+-        sha256 = "8a6fb40e8f8b6a66b4ba81a4044c68e6a7b1782f21cfabc06fb765332b4c3e51",
+-        strip_prefix = "wrapt-1.11.1/src/wrapt",
++        sha256 = "866211ed43c2639a2452cd017bd38589e83687b1d843817c96b99d2d9d32e8d7",
++        strip_prefix = "wrapt-1.14.1/src/wrapt",
+         system_build_file = "//third_party/systemlibs:wrapt.BUILD",
+         urls = [
+-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/GrahamDumpleton/wrapt/archive/1.11.1.tar.gz",
+-            "https://github.com/GrahamDumpleton/wrapt/archive/1.11.1.tar.gz",
++            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/GrahamDumpleton/wrapt/archive/1.14.1.tar.gz",
++            "https://github.com/GrahamDumpleton/wrapt/archive/1.14.1.tar.gz",
+         ],
+     )
+     tf_http_archive(
+diff --git a/third_party/gpus/cuda_configure.bzl b/third_party/gpus/cuda_configure.bzl
+index ed8ba3d5205..962a75b5eb2 100644
+--- a/third_party/gpus/cuda_configure.bzl
++++ b/third_party/gpus/cuda_configure.bzl
+@@ -710,7 +710,7 @@ def _get_cuda_config(repository_ctx, find_cuda_config_script):
+         cuda_version_major = cuda_major,
+         cudart_version = cudart_version,
+         cublas_version = cublas_version,
+-        cusolver_version = cusolver_version,
++        cusolver_version = "11",
+         curand_version = curand_version,
+         cufft_version = cufft_version,
+         cusparse_version = cusparse_version,
+diff --git a/third_party/protobuf/protobuf.patch b/third_party/protobuf/protobuf.patch
+index 8ce4a843759..cf8d4ca7e6b 100644
+--- a/third_party/protobuf/protobuf.patch
++++ b/third_party/protobuf/protobuf.patch
+@@ -40,4 +40,57 @@ index e0653321f..253d9cbb5 100644
+ +    deps = depset(deps).to_list()
+ 
+      if not ctx.attr.gen_cc and not ctx.attr.gen_py and not ctx.executable.plugin:
+-         return struct(
+\ No newline at end of file
++         return struct(
++diff --git a/python/google/protobuf/pyext/descriptor.cc b/python/google/protobuf/pyext/descriptor.cc
++index 1637f83a3..69368d4cf 100644
++--- a/python/google/protobuf/pyext/descriptor.cc
+++++ b/python/google/protobuf/pyext/descriptor.cc
++@@ -105,18 +105,18 @@ bool _CalledFromGeneratedFile(int stacklevel) {
++     return false;
++   }
++   while (stacklevel-- > 0) {
++-    frame = frame->f_back;
+++    frame = PyFrame_GetBack(frame);
++     if (frame == NULL) {
++       return false;
++     }
++   }
++
++-  if (frame->f_code->co_filename == NULL) {
+++  if (PyFrame_GetCode(frame)->co_filename == NULL) {
++     return false;
++   }
++   char* filename;
++   Py_ssize_t filename_size;
++-  if (PyString_AsStringAndSize(frame->f_code->co_filename,
+++  if (PyString_AsStringAndSize(PyFrame_GetCode(frame)->co_filename,
++                                &filename, &filename_size) < 0) {
++     // filename is not a string.
++     PyErr_Clear();
++@@ -137,7 +137,7 @@ bool _CalledFromGeneratedFile(int stacklevel) {
++     return false;
++   }
++
++-  if (frame->f_globals != frame->f_locals) {
+++  if (PyFrame_GetGlobals(frame) != PyFrame_GetLocals(frame)) {
++     // Not at global module scope
++     return false;
++   }
++diff --git a/python/google/protobuf/pyext/message.cc b/python/google/protobuf/pyext/message.cc
++index 3530a9b37..c31fa8fcc 100644
++--- a/python/google/protobuf/pyext/message.cc
+++++ b/python/google/protobuf/pyext/message.cc
++@@ -2991,8 +2991,12 @@ bool InitProto2MessageModule(PyObject *m) {
++         reinterpret_cast<PyObject*>(
++             &RepeatedCompositeContainer_Type));
++
++-    // Register them as collections.Sequence
+++    // Register them as MutableSequence.
+++#if PY_MAJOR_VERSION >= 3
+++    ScopedPyObjectPtr collections(PyImport_ImportModule("collections.abc"));
+++#else
++     ScopedPyObjectPtr collections(PyImport_ImportModule("collections"));
+++#endif
++     if (collections == NULL) {
++       return false;
++     }
+diff --git a/third_party/wrapt.BUILD b/third_party/wrapt.BUILD
+index bed5332edaf..da65ea90300 100644
+--- a/third_party/wrapt.BUILD
++++ b/third_party/wrapt.BUILD
+@@ -2,6 +2,7 @@ py_library(
+     name = "wrapt",
+     srcs = [
+         "__init__.py",
++        "arguments.py",
+         "decorators.py",
+         "importer.py",
+         "wrappers.py",

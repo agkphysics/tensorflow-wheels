@@ -1,0 +1,646 @@
+diff --git a/tensorflow/compiler/xla/service/gpu/BUILD b/tensorflow/compiler/xla/service/gpu/BUILD
+index 29b24cc9562..2fd0dfb042b 100644
+--- a/tensorflow/compiler/xla/service/gpu/BUILD
++++ b/tensorflow/compiler/xla/service/gpu/BUILD
+@@ -810,8 +810,8 @@ cc_library(
+         ":precompiled_kernels",
+         ":triangular_solve_thunk",
+     ]) + if_cuda_is_configured([
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
+         "//tensorflow/stream_executor/cuda:cuda_stream",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/core/platform/default/build_config:cudnn_plugin",
+         "//tensorflow/core/platform/default/build_config:cufft_plugin",
+         "//tensorflow/core/platform/default/build_config:stream_executor_cuda",  # build_cleaner: keep
+@@ -1057,9 +1057,10 @@ cc_library(
+         "//tensorflow/compiler/xla/service:buffer_assignment",
+         "//tensorflow/compiler/xla:status",
+         "//tensorflow/core:tflite_portable_logging",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/stream_executor:device_memory",
+         "//tensorflow/stream_executor:stream_header",
++        "//tensorflow/stream_executor/cuda:cublas_lt_header",
+     ]),
+ )
+ 
+@@ -1085,7 +1086,7 @@ cc_library(
+         "//tensorflow/core/protobuf:autotuning_proto_cc",
+         "//tensorflow/core/util/proto:proto_utils",
+         "//tensorflow/stream_executor:blas",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/stream_executor:device_memory",
+         "//tensorflow/stream_executor:device_memory_allocator",
+         "//tensorflow/stream_executor/gpu:redzone_allocator",
+@@ -1114,7 +1115,8 @@ cc_library(
+         "//tensorflow/core/platform:statusor",
+         "//tensorflow/stream_executor:stream_header",
+     ] + if_cuda_is_configured([
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/stream_executor/cuda:cublas_lt_header",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/stream_executor:host_or_device_scalar",
+         "//tensorflow/stream_executor:scratch_allocator",
+     ]),
+diff --git a/tensorflow/core/kernels/BUILD b/tensorflow/core/kernels/BUILD
+index b2865e4cb74..8f22ec29d13 100644
+--- a/tensorflow/core/kernels/BUILD
++++ b/tensorflow/core/kernels/BUILD
+@@ -3620,7 +3620,7 @@ tf_kernel_library(
+         "//conditions:default": [],
+     }) + mkl_deps() + if_cuda([
+         ":matmul_util",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+     ]) + if_cuda_or_rocm([
+         ":gpu_utils",
+     ]),
+@@ -3637,7 +3637,8 @@ cc_library(
+         "//tensorflow/core:lib",
+         "//tensorflow/core/platform:tensor_float_32_hdr_lib",
+         "//tensorflow/core/util:env_var",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/stream_executor/cuda:cublas_lt_header",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+     ]) + if_static(["//tensorflow/core/platform:tensor_float_32_utils"]),
+ )
+ 
+diff --git a/tensorflow/python/keras/utils/tf_inspect.py b/tensorflow/python/keras/utils/tf_inspect.py
+index fb88b6a922a..a1118644f38 100644
+--- a/tensorflow/python/keras/utils/tf_inspect.py
++++ b/tensorflow/python/keras/utils/tf_inspect.py
+@@ -20,7 +20,10 @@ import inspect as _inspect
+ 
+ from tensorflow.python.util import tf_decorator
+ 
+-ArgSpec = _inspect.ArgSpec
++try:
++  ArgSpec = _inspect.ArgSpec
++except:
++  pass
+ 
+ 
+ if hasattr(_inspect, 'FullArgSpec'):
+@@ -64,11 +67,21 @@ if hasattr(_inspect, 'getfullargspec'):
+       from FullArgSpec.
+     """
+     fullargspecs = getfullargspec(target)
+-    argspecs = ArgSpec(
+-        args=fullargspecs.args,
+-        varargs=fullargspecs.varargs,
+-        keywords=fullargspecs.varkw,
+-        defaults=fullargspecs.defaults)
++    if hasattr(_inspect, 'ArgSpec'):
++      argspecs = ArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          keywords=fullargspecs.varkw,
++          defaults=fullargspecs.defaults)
++    else:
++      argspecs = FullArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          varkw=fullargspecs.varkw,
++          defaults=fullargspecs.defaults,
++          kwonlyargs=[],
++          kwonlydefaults=None,
++          annotations={})
+     return argspecs
+ else:
+   _getargspec = _inspect.getargspec
+diff --git a/tensorflow/python/lib/core/bfloat16.cc b/tensorflow/python/lib/core/bfloat16.cc
+index 2f4031df139..a8ec05d2f4b 100644
+--- a/tensorflow/python/lib/core/bfloat16.cc
++++ b/tensorflow/python/lib/core/bfloat16.cc
+@@ -1642,7 +1642,11 @@ bool RegisterNumpyDtype(PyObject* numpy) {
+   arr_funcs.argmax = NPyCustomFloat_ArgMaxFunc<T>;
+   arr_funcs.argmin = NPyCustomFloat_ArgMinFunc<T>;
+ 
++#if PY_VERSION_HEX < 0x030900A4 && !defined(Py_SET_TYPE)
+   Py_TYPE(&CustomFloatTypeDescriptor<T>::npy_descr) = &PyArrayDescr_Type;
++#else
++  Py_SET_TYPE(&CustomFloatTypeDescriptor<T>::npy_descr, &PyArrayDescr_Type);
++#endif
+   TypeDescriptor<T>::npy_type =
+       PyArray_RegisterDataType(&CustomFloatTypeDescriptor<T>::npy_descr);
+   TypeDescriptor<T>::type_ptr = &TypeDescriptor<T>::type;
+diff --git a/tensorflow/python/profiler/internal/python_hooks.cc b/tensorflow/python/profiler/internal/python_hooks.cc
+index 62b1dddc92f..39bc0cd4966 100644
+--- a/tensorflow/python/profiler/internal/python_hooks.cc
++++ b/tensorflow/python/profiler/internal/python_hooks.cc
+@@ -274,8 +274,14 @@ void PythonHookContext::ProfileFast(PyFrameObject* frame, int what,
+ 
+   switch (what) {
+     case PyTrace_CALL: {
++#if PY_VERSION_HEX < 0x030b0000
+       PyCodeObject* f_code = frame->f_code;
+       thread_traces.active.emplace(now, 0, f_code);
++#else   // PY_VERSION_HEX < 0x030b0000
++      PyCodeObject* f_code = PyFrame_GetCode(frame);
++      thread_traces.active.emplace(now, 0, f_code);
++      Py_XDECREF(f_code);
++#endif  // PY_VERSION_HEX < 0x030b0000
+       break;
+     }
+     case PyTrace_RETURN:
+@@ -286,8 +292,14 @@ void PythonHookContext::ProfileFast(PyFrameObject* frame, int what,
+         thread_traces.completed.emplace_back(std::move(entry));
+         thread_traces.active.pop();
+       } else if (options_.include_incomplete_events) {
++#if PY_VERSION_HEX < 0x030b0000
+         PyCodeObject* f_code = frame->f_code;
+         thread_traces.completed.emplace_back(start_timestamp_ns_, now, f_code);
++#else   // PY_VERSION_HEX < 0x030b0000
++        PyCodeObject* f_code = PyFrame_GetCode(frame);
++        thread_traces.completed.emplace_back(start_timestamp_ns_, now, f_code);
++        Py_XDECREF(f_code);
++#endif  // PY_VERSION_HEX < 0x030b0000
+       }
+       break;
+     }
+diff --git a/tensorflow/python/util/dispatch.py b/tensorflow/python/util/dispatch.py
+index 91e592cecb1..5c95a6d0586 100644
+--- a/tensorflow/python/util/dispatch.py
++++ b/tensorflow/python/util/dispatch.py
+@@ -441,7 +441,12 @@ def _add_name_scope_wrapper(func, api_signature):
+ 
+   func_signature = tf_inspect.signature(func)
+   func_argspec = tf_inspect.getargspec(func)
+-  if "name" in func_signature.parameters or func_argspec.keywords is not None:
++  kw = None
++  if hasattr(func_argspec, 'keywords'):
++    kw = func_argspec.keywords
++  elif hasattr(func_argspec, 'varkw'):
++    kw = func_argspec.varkw
++  if "name" in func_signature.parameters or kw is not None:
+     return func  # No wrapping needed (already has name parameter).
+ 
+   name_index = list(api_signature.parameters).index("name")
+@@ -551,7 +556,12 @@ def add_type_based_api_dispatcher(target):
+ 
+   _, unwrapped = tf_decorator.unwrap(target)
+   target_argspec = tf_inspect.getargspec(unwrapped)
+-  if target_argspec.varargs or target_argspec.keywords:
++  kw = None
++  if hasattr(target_argspec, 'keywords'):
++    kw = target_argspec.keywords
++  elif hasattr(target_argspec, 'varkw'):
++    kw = target_argspec.varkw
++  if target_argspec.varargs or kw:
+     # @TODO(b/194903203) Add v2 dispatch support for APIs that take varargs
+     # and keywords.  Examples of APIs that take varargs and kwargs: meshgrid,
+     # einsum, map_values, map_flat_values.
+@@ -581,7 +591,12 @@ def _check_signature(api_signature, func):
+   """
+   # Special case: if func_signature is (*args, **kwargs), then assume it's ok.
+   func_argspec = tf_inspect.getargspec(func)
+-  if (func_argspec.varargs is not None and func_argspec.keywords is not None
++  kw = None
++  if hasattr(func_argspec, 'keywords'):
++    kw = func_argspec.keywords
++  elif hasattr(func_argspec, 'varkw'):
++    kw = func_argspec.varkw
++  if (func_argspec.varargs is not None and kw is not None
+       and not func_argspec.args):
+     return
+ 
+diff --git a/tensorflow/python/util/stack_trace.h b/tensorflow/python/util/stack_trace.h
+index 899603c121e..070f46c8e0c 100644
+--- a/tensorflow/python/util/stack_trace.h
++++ b/tensorflow/python/util/stack_trace.h
+@@ -61,10 +61,19 @@ class StackTrace final {
+     if (limit == -1) limit = std::numeric_limits<int>::max();
+ 
+     StackTrace result;
++#if PY_VERSION_HEX >= 0x030B0000
++    PyFrameObject* frame = PyThreadState_GetFrame(PyThreadState_GET());
++#else
+     const PyFrameObject* frame = PyThreadState_GET()->frame;
++#endif
+     int i = 0;
++#if PY_VERSION_HEX >= 0x030B0000
++    for (; i < limit && frame != nullptr; PyFrame_GetBack(frame), ++i) {
++      PyCodeObject* code_obj = PyFrame_GetCode(frame);
++#else
+     for (; i < limit && frame != nullptr; frame = frame->f_back, ++i) {
+       PyCodeObject* code_obj = frame->f_code;
++#endif
+       DCHECK(code_obj != nullptr);
+ 
+       Py_INCREF(code_obj);
+diff --git a/tensorflow/python/util/tf_inspect.py b/tensorflow/python/util/tf_inspect.py
+index 183647b2d0a..c51228efbe9 100644
+--- a/tensorflow/python/util/tf_inspect.py
++++ b/tensorflow/python/util/tf_inspect.py
+@@ -35,7 +35,10 @@ def signature(obj, *, follow_wrapped=True):
+ Parameter = _inspect.Parameter
+ Signature = _inspect.Signature
+ 
+-ArgSpec = _inspect.ArgSpec
++try:
++  ArgSpec = _inspect.ArgSpec
++except:
++  pass
+ 
+ 
+ if hasattr(_inspect, 'FullArgSpec'):
+@@ -79,11 +82,21 @@ if hasattr(_inspect, 'getfullargspec'):
+       from FullArgSpec.
+     """
+     fullargspecs = getfullargspec(target)
+-    argspecs = ArgSpec(
+-        args=fullargspecs.args,
+-        varargs=fullargspecs.varargs,
+-        keywords=fullargspecs.varkw,
+-        defaults=fullargspecs.defaults)
++    if hasattr(_inspect, 'ArgSpec'):
++      argspecs = ArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          keywords=fullargspecs.varkw,
++          defaults=fullargspecs.defaults)
++    else:
++      argspecs = FullArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          varkw=fullargspecs.varkw,
++          defaults=fullargspecs.defaults,
++          kwonlyargs=[],
++          kwonlydefaults=None,
++          annotations={})
+     return argspecs
+ else:
+   _getargspec = _inspect.getargspec
+diff --git a/tensorflow/stream_executor/cuda/BUILD b/tensorflow/stream_executor/cuda/BUILD
+index 4d6a692f4fe..94a243907f6 100644
+--- a/tensorflow/stream_executor/cuda/BUILD
++++ b/tensorflow/stream_executor/cuda/BUILD
+@@ -2,7 +2,7 @@
+ #   CUDA-platform specific StreamExecutor support code.
+ 
+ load("//tensorflow:tensorflow.bzl", "tf_cc_test", "tf_copts", "tf_cuda_cc_test")
+-load("//tensorflow:tensorflow.bzl", "filegroup")
++load("//tensorflow:tensorflow.bzl", "check_deps", "filegroup")
+ load(
+     "//tensorflow/stream_executor:build_defs.bzl",
+     "stream_executor_friends",
+@@ -260,6 +260,18 @@ alias(
+     visibility = ["//visibility:public"],
+ )
+ 
++cc_library(
++    name = "cublas_lt_header",
++    hdrs = [
++        "cuda_blas_lt.h",
++        "cuda_blas_utils.h",
++    ],
++    visibility = ["//visibility:public"],
++    deps = [
++        "//tensorflow/stream_executor/platform",
++    ],
++)
++
+ cc_library(
+     name = "cublas_lt_stub",
+     srcs = if_cuda_is_configured(["cublasLt_stub.cc"]),
+@@ -689,6 +701,30 @@ cc_library(
+     alwayslink = 1,
+ )
+ 
++# To avoid duplication, check that the C++ or python library does not depend on
++# the stream executor cuda plugins. Targets that want to use cuda APIs should
++# instead depend on the dummy plugins in //tensorflow/core/platform/default/build_config
++# and use header only targets.
++check_deps(
++    name = "cuda_plugins_check_deps",
++    disallowed_deps = if_static(
++        [],
++        otherwise = [
++            ":all_runtime",
++            ":cuda_driver",
++            ":cuda_platform",
++            ":cudnn_plugin",
++            ":cufft_plugin",
++            ":curand_plugin",
++            "//tensorflow/stream_executor:cuda_platform",
++        ],
++    ),
++    deps = [
++        "//tensorflow:tensorflow_cc",
++        "//tensorflow/python:pywrap_tensorflow_internal",
++    ],
++)
++
+ tf_cuda_cc_test(
+     name = "redzone_allocator_test",
+     srcs = ["redzone_allocator_test.cc"],
+diff --git a/tensorflow/stream_executor/cuda/cublas_11_0.inc b/tensorflow/stream_executor/cuda/cublas_11_0.inc
+index ebc4ec29693..d287a91c562 100644
+--- a/tensorflow/stream_executor/cuda/cublas_11_0.inc
++++ b/tensorflow/stream_executor/cuda/cublas_11_0.inc
+@@ -1,7 +1,6 @@
+ // Auto-generated, do not edit.
+ 
+ extern "C" {
+-
+ cublasStatus_t CUBLASWINAPI cublasCreate_v2(cublasHandle_t *handle) {
+   using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(cublasHandle_t *);
+   static auto func_ptr = LoadSymbol<FuncPtr>("cublasCreate_v2");
+@@ -119,6 +118,36 @@ cublasStatus_t CUBLASWINAPI cublasSetMathMode(cublasHandle_t handle,
+   return func_ptr(handle, mode);
+ }
+ 
++cublasStatus_t CUBLASWINAPI cublasGetSmCountTarget(cublasHandle_t handle,
++                                                   int *smCountTarget) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(cublasHandle_t, int *);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetSmCountTarget");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, smCountTarget);
++}
++
++cublasStatus_t CUBLASWINAPI cublasSetSmCountTarget(cublasHandle_t handle,
++                                                   int smCountTarget) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(cublasHandle_t, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasSetSmCountTarget");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, smCountTarget);
++}
++
++const char *CUBLASWINAPI cublasGetStatusName(cublasStatus_t status) {
++  using FuncPtr = const char *(CUBLASWINAPI *)(cublasStatus_t);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetStatusName");
++  if (!func_ptr) return "cublasGetStatusName symbol not found.";
++  return func_ptr(status);
++}
++
++const char *CUBLASWINAPI cublasGetStatusString(cublasStatus_t status) {
++  using FuncPtr = const char *(CUBLASWINAPI *)(cublasStatus_t);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetStatusString");
++  if (!func_ptr) return "cublasGetStatusString symbol not found.";
++  return func_ptr(status);
++}
++
+ cublasStatus_t CUBLASWINAPI cublasLoggerConfigure(int logIsOn, int logToStdOut,
+                                                   int logToStdErr,
+                                                   const char *logFileName) {
+@@ -1976,6 +2005,141 @@ cublasZhpr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n,
+   return func_ptr(handle, uplo, n, alpha, x, incx, y, incy, AP);
+ }
+ 
++cublasStatus_t CUBLASWINAPI cublasSgemvBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const float *alpha, /* host or device pointer */
++    const float *const Aarray[], int lda, const float *const xarray[], int incx,
++    const float *beta, /* host or device pointer */
++    float *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const float *,
++      const float *const[], int, const float *const[], int, const float *,
++      float *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasSgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasDgemvBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const double *alpha, /* host or device pointer */
++    const double *const Aarray[], int lda, const double *const xarray[],
++    int incx, const double *beta, /* host or device pointer */
++    double *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const double *,
++      const double *const[], int, const double *const[], int, const double *,
++      double *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasDgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasCgemvBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const cuComplex *alpha, /* host or device pointer */
++    const cuComplex *const Aarray[], int lda, const cuComplex *const xarray[],
++    int incx, const cuComplex *beta, /* host or device pointer */
++    cuComplex *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuComplex *,
++      const cuComplex *const[], int, const cuComplex *const[], int,
++      const cuComplex *, cuComplex *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasCgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI
++cublasZgemvBatched(cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++                   const cuDoubleComplex *alpha, /* host or device pointer */
++                   const cuDoubleComplex *const Aarray[], int lda,
++                   const cuDoubleComplex *const xarray[], int incx,
++                   const cuDoubleComplex *beta, /* host or device pointer */
++                   cuDoubleComplex *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuDoubleComplex *,
++      const cuDoubleComplex *const[], int, const cuDoubleComplex *const[], int,
++      const cuDoubleComplex *, cuDoubleComplex *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasZgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasSgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const float *alpha,                             /* host or device pointer */
++    const float *A, int lda, long long int strideA, /* purposely signed */
++    const float *x, int incx, long long int stridex,
++    const float *beta, /* host or device pointer */
++    float *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const float *, const float *,
++      int, long long, const float *, int, long long, const float *, float *,
++      int, long long, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasSgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasDgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const double *alpha, /* host or device pointer */
++    const double *A, int lda, long long int strideA, /* purposely signed */
++    const double *x, int incx, long long int stridex,
++    const double *beta, /* host or device pointer */
++    double *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const double *,
++      const double *, int, long long, const double *, int, long long,
++      const double *, double *, int, long long, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasDgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasCgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const cuComplex *alpha, /* host or device pointer */
++    const cuComplex *A, int lda, long long int strideA, /* purposely signed */
++    const cuComplex *x, int incx, long long int stridex,
++    const cuComplex *beta, /* host or device pointer */
++    cuComplex *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuComplex *,
++      const cuComplex *, int, long long, const cuComplex *, int, long long,
++      const cuComplex *, cuComplex *, int, long long, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasCgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasZgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const cuDoubleComplex *alpha, /* host or device pointer */
++    const cuDoubleComplex *A, int lda,
++    long long int strideA, /* purposely signed */
++    const cuDoubleComplex *x, int incx, long long int stridex,
++    const cuDoubleComplex *beta, /* host or device pointer */
++    cuDoubleComplex *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuDoubleComplex *,
++      const cuDoubleComplex *, int, long long, const cuDoubleComplex *, int,
++      long long, const cuDoubleComplex *, cuDoubleComplex *, int, long long,
++      int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasZgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
+ cublasStatus_t CUBLASWINAPI cublasSgemm_v2(
+     cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+     int m, int n, int k, const float *alpha, /* host or device pointer */
+@@ -5030,11 +5194,4 @@ void CUBLASWINAPI cublasZtrmm(char side, char uplo, char transa, char diag,
+   return func_ptr(side, uplo, transa, diag, m, n, alpha, A, lda, B, ldb);
+ }
+ 
+-CUBLASAPI const char* CUBLASWINAPI cublasGetStatusString(cublasStatus_t status) {
+-  using FuncPtr = const char*(CUBLASWINAPI *)(cublasStatus_t);
+-  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetStatusString");
+-  if (!func_ptr) LogFatalSymbolNotFound("cublasGetStatusString");
+-  return func_ptr(status);
+-}
+-
+ }  // extern "C"
+diff --git a/tensorflow/workspace2.bzl b/tensorflow/workspace2.bzl
+index 49c08389b87..1ff77b87c34 100644
+--- a/tensorflow/workspace2.bzl
++++ b/tensorflow/workspace2.bzl
+@@ -688,10 +688,10 @@ def _tf_repositories():
+     tf_http_archive(
+         name = "cython",
+         build_file = "//third_party:cython.BUILD",
+-        sha256 = "d530216e015fd365bf3327a176e0073d0e5b8d48781f387336459f10032d776f",
+-        strip_prefix = "cython-3.0.0a10",
++        sha256 = "08dbdb6aa003f03e65879de8f899f87c8c718cd874a31ae9c29f8726da2f5ab0",
++        strip_prefix = "cython-3.0.0a11",
+         system_build_file = "//third_party/systemlibs:cython.BUILD",
+-        urls = tf_mirror_urls("https://github.com/cython/cython/archive/3.0.0a10.tar.gz"),
++        urls = tf_mirror_urls("https://github.com/cython/cython/archive/3.0.0a11.tar.gz"),
+     )
+ 
+     # LINT.IfChange
+@@ -843,12 +843,11 @@ def _tf_repositories():
+         urls = tf_mirror_urls("https://github.com/nlohmann/json/archive/v3.10.5.tar.gz"),
+     )
+ 
+-    # Pybind11 2.9.x causes seg faults in TF Text, see cl/442586909
+     tf_http_archive(
+         name = "pybind11",
+-        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.8.1.tar.gz"),
+-        sha256 = "f1bcc07caa568eb312411dde5308b1e250bd0e1bc020fae855bf9f43209940cc",
+-        strip_prefix = "pybind11-2.8.1",
++        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.10.0.tar.gz"),
++        sha256 = "eacf582fa8f696227988d08cfc46121770823839fe9e301a20fbce67e7cd70ec",
++        strip_prefix = "pybind11-2.10.0",
+         build_file = "//third_party:pybind11.BUILD",
+         system_build_file = "//third_party/systemlibs:pybind11.BUILD",
+     )
+@@ -856,10 +855,10 @@ def _tf_repositories():
+     tf_http_archive(
+         name = "wrapt",
+         build_file = "//third_party:wrapt.BUILD",
+-        sha256 = "8a6fb40e8f8b6a66b4ba81a4044c68e6a7b1782f21cfabc06fb765332b4c3e51",
+-        strip_prefix = "wrapt-1.11.1/src/wrapt",
++        sha256 = "866211ed43c2639a2452cd017bd38589e83687b1d843817c96b99d2d9d32e8d7",
++        strip_prefix = "wrapt-1.14.1/src/wrapt",
+         system_build_file = "//third_party/systemlibs:wrapt.BUILD",
+-        urls = tf_mirror_urls("https://github.com/GrahamDumpleton/wrapt/archive/1.11.1.tar.gz"),
++        urls = tf_mirror_urls("https://github.com/GrahamDumpleton/wrapt/archive/1.14.1.tar.gz"),
+     )
+ 
+     tf_http_archive(
+diff --git a/third_party/protobuf/protobuf.patch b/third_party/protobuf/protobuf.patch
+index 1aae0459185..9ad6f189469 100644
+--- a/third_party/protobuf/protobuf.patch
++++ b/third_party/protobuf/protobuf.patch
+@@ -168,6 +168,41 @@ index e0653321f..4156a1275 100644
+      grpc_cpp_plugin = None
+      if use_grpc_plugin:
+          grpc_cpp_plugin = "//external:grpc_cpp_plugin"
++diff --git a/python/google/protobuf/pyext/descriptor.cc b/python/google/protobuf/pyext/descriptor.cc
++index 1637f83a3..69368d4cf 100644
++--- a/python/google/protobuf/pyext/descriptor.cc
+++++ b/python/google/protobuf/pyext/descriptor.cc
++@@ -105,18 +105,18 @@ bool _CalledFromGeneratedFile(int stacklevel) {
++     return false;
++   }
++   while (stacklevel-- > 0) {
++-    frame = frame->f_back;
+++    frame = PyFrame_GetBack(frame);
++     if (frame == NULL) {
++       return false;
++     }
++   }
++ 
++-  if (frame->f_code->co_filename == NULL) {
+++  if (PyFrame_GetCode(frame)->co_filename == NULL) {
++     return false;
++   }
++   char* filename;
++   Py_ssize_t filename_size;
++-  if (PyString_AsStringAndSize(frame->f_code->co_filename,
+++  if (PyString_AsStringAndSize(PyFrame_GetCode(frame)->co_filename,
++                                &filename, &filename_size) < 0) {
++     // filename is not a string.
++     PyErr_Clear();
++@@ -137,7 +137,7 @@ bool _CalledFromGeneratedFile(int stacklevel) {
++     return false;
++   }
++ 
++-  if (frame->f_globals != frame->f_locals) {
+++  if (PyFrame_GetGlobals(frame) != PyFrame_GetLocals(frame)) {
++     // Not at global module scope
++     return false;
++   }
+ diff --git a/python/google/protobuf/pyext/message.cc b/python/google/protobuf/pyext/message.cc
+ index 3530a9b37..c31fa8fcc 100644
+ --- a/python/google/protobuf/pyext/message.cc
+diff --git a/third_party/wrapt.BUILD b/third_party/wrapt.BUILD
+index bed5332edaf..da65ea90300 100644
+--- a/third_party/wrapt.BUILD
++++ b/third_party/wrapt.BUILD
+@@ -2,6 +2,7 @@ py_library(
+     name = "wrapt",
+     srcs = [
+         "__init__.py",
++        "arguments.py",
+         "decorators.py",
+         "importer.py",
+         "wrappers.py",

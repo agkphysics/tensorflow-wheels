@@ -1,0 +1,30 @@
+diff --git a/tensorflow/workspace2.bzl b/tensorflow/workspace2.bzl
+index 18b63ab47fb..78bcf25fb02 100644
+--- a/tensorflow/workspace2.bzl
++++ b/tensorflow/workspace2.bzl
+@@ -862,10 +862,10 @@ def _tf_repositories():
+     tf_http_archive(
+         name = "wrapt",
+         build_file = "//third_party:wrapt.BUILD",
+-        sha256 = "8a6fb40e8f8b6a66b4ba81a4044c68e6a7b1782f21cfabc06fb765332b4c3e51",
+-        strip_prefix = "wrapt-1.11.1/src/wrapt",
++        sha256 = "866211ed43c2639a2452cd017bd38589e83687b1d843817c96b99d2d9d32e8d7",
++        strip_prefix = "wrapt-1.14.1/src/wrapt",
+         system_build_file = "//third_party/systemlibs:wrapt.BUILD",
+-        urls = tf_mirror_urls("https://github.com/GrahamDumpleton/wrapt/archive/1.11.1.tar.gz"),
++        urls = tf_mirror_urls("https://github.com/GrahamDumpleton/wrapt/archive/1.14.1.tar.gz"),
+     )
+ 
+     tf_http_archive(
+diff --git a/third_party/wrapt.BUILD b/third_party/wrapt.BUILD
+index bed5332edaf..da65ea90300 100644
+--- a/third_party/wrapt.BUILD
++++ b/third_party/wrapt.BUILD
+@@ -2,6 +2,7 @@ py_library(
+     name = "wrapt",
+     srcs = [
+         "__init__.py",
++        "arguments.py",
+         "decorators.py",
+         "importer.py",
+         "wrappers.py",

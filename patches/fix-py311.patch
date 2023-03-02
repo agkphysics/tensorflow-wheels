@@ -1,0 +1,145 @@
+From e3ff0f63dcde80216192c41c8d921e2f44e15999 Mon Sep 17 00:00:00 2001
+From: Balint Cristian <cristian.balint@gmail.com>
+Date: Thu, 27 Oct 2022 19:11:49 +0300
+Subject: [PATCH] Support python 3.11 changes.
+
+Signed-off-by: Balint Cristian <cristian.balint@gmail.com>
+---
+ tensorflow/python/keras/utils/tf_inspect.py | 25 ++++++++++++++++-----
+ tensorflow/python/util/dispatch.py          | 21 ++++++++++++++---
+ tensorflow/python/util/stack_trace.h        |  9 ++++++++
+ tensorflow/python/util/tf_inspect.py        | 25 ++++++++++++++++-----
+ 4 files changed, 65 insertions(+), 15 deletions(-)
+
+diff --git a/tensorflow/python/keras/utils/tf_inspect.py b/tensorflow/python/keras/utils/tf_inspect.py
+index fb88b6a922a5a..a1118644f3896 100644
+--- a/tensorflow/python/keras/utils/tf_inspect.py
++++ b/tensorflow/python/keras/utils/tf_inspect.py
+@@ -20,7 +20,10 @@
+
+ from tensorflow.python.util import tf_decorator
+
+-ArgSpec = _inspect.ArgSpec
++try:
++  ArgSpec = _inspect.ArgSpec
++except:
++  pass
+
+
+ if hasattr(_inspect, 'FullArgSpec'):
+@@ -64,11 +67,21 @@ def _getargspec(target):
+       from FullArgSpec.
+     """
+     fullargspecs = getfullargspec(target)
+-    argspecs = ArgSpec(
+-        args=fullargspecs.args,
+-        varargs=fullargspecs.varargs,
+-        keywords=fullargspecs.varkw,
+-        defaults=fullargspecs.defaults)
++    if hasattr(_inspect, 'ArgSpec'):
++      argspecs = ArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          keywords=fullargspecs.varkw,
++          defaults=fullargspecs.defaults)
++    else:
++      argspecs = FullArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          varkw=fullargspecs.varkw,
++          defaults=fullargspecs.defaults,
++          kwonlyargs=[],
++          kwonlydefaults=None,
++          annotations={})
+     return argspecs
+ else:
+   _getargspec = _inspect.getargspec
+diff --git a/tensorflow/python/util/dispatch.py b/tensorflow/python/util/dispatch.py
+index 91e592cecb1d4..5c95a6d058658 100644
+--- a/tensorflow/python/util/dispatch.py
++++ b/tensorflow/python/util/dispatch.py
+@@ -441,7 +441,12 @@ def _add_name_scope_wrapper(func, api_signature):
+
+   func_signature = tf_inspect.signature(func)
+   func_argspec = tf_inspect.getargspec(func)
+-  if "name" in func_signature.parameters or func_argspec.keywords is not None:
++  kw = None
++  if hasattr(func_argspec, 'keywords'):
++    kw = func_argspec.keywords
++  elif hasattr(func_argspec, 'varkw'):
++    kw = func_argspec.varkw
++  if "name" in func_signature.parameters or kw is not None:
+     return func  # No wrapping needed (already has name parameter).
+
+   name_index = list(api_signature.parameters).index("name")
+@@ -551,7 +556,12 @@ def add_type_based_api_dispatcher(target):
+
+   _, unwrapped = tf_decorator.unwrap(target)
+   target_argspec = tf_inspect.getargspec(unwrapped)
+-  if target_argspec.varargs or target_argspec.keywords:
++  kw = None
++  if hasattr(target_argspec, 'keywords'):
++    kw = target_argspec.keywords
++  elif hasattr(target_argspec, 'varkw'):
++    kw = target_argspec.varkw
++  if target_argspec.varargs or kw:
+     # @TODO(b/194903203) Add v2 dispatch support for APIs that take varargs
+     # and keywords.  Examples of APIs that take varargs and kwargs: meshgrid,
+     # einsum, map_values, map_flat_values.
+@@ -581,7 +591,12 @@ def _check_signature(api_signature, func):
+   """
+   # Special case: if func_signature is (*args, **kwargs), then assume it's ok.
+   func_argspec = tf_inspect.getargspec(func)
+-  if (func_argspec.varargs is not None and func_argspec.keywords is not None
++  kw = None
++  if hasattr(func_argspec, 'keywords'):
++    kw = func_argspec.keywords
++  elif hasattr(func_argspec, 'varkw'):
++    kw = func_argspec.varkw
++  if (func_argspec.varargs is not None and kw is not None
+       and not func_argspec.args):
+     return
+
+diff --git a/tensorflow/python/util/tf_inspect.py b/tensorflow/python/util/tf_inspect.py
+index 183647b2d0ad4..c51228efbe92c 100644
+--- a/tensorflow/python/util/tf_inspect.py
++++ b/tensorflow/python/util/tf_inspect.py
+@@ -35,7 +35,10 @@ def signature(obj, *, follow_wrapped=True):
+ Parameter = _inspect.Parameter
+ Signature = _inspect.Signature
+
+-ArgSpec = _inspect.ArgSpec
++try:
++  ArgSpec = _inspect.ArgSpec
++except:
++  pass
+
+
+ if hasattr(_inspect, 'FullArgSpec'):
+@@ -79,11 +82,21 @@ def _getargspec(target):
+       from FullArgSpec.
+     """
+     fullargspecs = getfullargspec(target)
+-    argspecs = ArgSpec(
+-        args=fullargspecs.args,
+-        varargs=fullargspecs.varargs,
+-        keywords=fullargspecs.varkw,
+-        defaults=fullargspecs.defaults)
++    if hasattr(_inspect, 'ArgSpec'):
++      argspecs = ArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          keywords=fullargspecs.varkw,
++          defaults=fullargspecs.defaults)
++    else:
++      argspecs = FullArgSpec(
++          args=fullargspecs.args,
++          varargs=fullargspecs.varargs,
++          varkw=fullargspecs.varkw,
++          defaults=fullargspecs.defaults,
++          kwonlyargs=[],
++          kwonlydefaults=None,
++          annotations={})
+     return argspecs
+ else:
+   _getargspec = _inspect.getargspec

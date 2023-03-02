@@ -1,0 +1,397 @@
+From 047c9aae814596b1398d84c6e44e04d10b08d85e Mon Sep 17 00:00:00 2001
+From: Trevor Morris <tmorris@nvidia.com>
+Date: Wed, 6 Jul 2022 14:20:07 -0700
+Subject: [PATCH 1/4] Fix cublas build issues and update stub
+
+---
+ tensorflow/compiler/xla/service/gpu/BUILD     |  10 +-
+ tensorflow/core/kernels/BUILD                 |   5 +-
+ tensorflow/stream_executor/cuda/BUILD         |   9 +
+ .../stream_executor/cuda/cublas_11_0.inc      | 166 +++++++++++++++++-
+ 4 files changed, 183 insertions(+), 7 deletions(-)
+
+diff --git a/tensorflow/compiler/xla/service/gpu/BUILD b/tensorflow/compiler/xla/service/gpu/BUILD
+index 5ead7769c0c1f..6a8ae6937844b 100644
+--- a/tensorflow/compiler/xla/service/gpu/BUILD
++++ b/tensorflow/compiler/xla/service/gpu/BUILD
+@@ -810,8 +810,8 @@ cc_library(
+         ":precompiled_kernels",
+         ":triangular_solve_thunk",
+     ]) + if_cuda_is_configured([
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
+         "//tensorflow/stream_executor/cuda:cuda_stream",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/core/platform/default/build_config:cudnn_plugin",
+         "//tensorflow/core/platform/default/build_config:cufft_plugin",
+         "//tensorflow/core/platform/default/build_config:stream_executor_cuda",  # build_cleaner: keep
+@@ -1057,9 +1057,10 @@ cc_library(
+         "//tensorflow/compiler/xla/service:buffer_assignment",
+         "//tensorflow/compiler/xla:status",
+         "//tensorflow/core:tflite_portable_logging",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/stream_executor:device_memory",
+         "//tensorflow/stream_executor:stream_header",
++        "//tensorflow/stream_executor/cuda:cublas_lt_header",
+     ]),
+ )
+ 
+@@ -1085,7 +1086,7 @@ cc_library(
+         "//tensorflow/core/protobuf:autotuning_proto_cc",
+         "//tensorflow/core/util/proto:proto_utils",
+         "//tensorflow/stream_executor:blas",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/stream_executor:device_memory",
+         "//tensorflow/stream_executor:device_memory_allocator",
+         "//tensorflow/stream_executor/gpu:redzone_allocator",
+@@ -1114,7 +1115,8 @@ cc_library(
+         "//tensorflow/core/platform:statusor",
+         "//tensorflow/stream_executor:stream_header",
+     ] + if_cuda_is_configured([
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/stream_executor/cuda:cublas_lt_header",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+         "//tensorflow/stream_executor:host_or_device_scalar",
+         "//tensorflow/stream_executor:scratch_allocator",
+     ]),
+diff --git a/tensorflow/core/kernels/BUILD b/tensorflow/core/kernels/BUILD
+index a7109b00c6ce1..80e4e87c8eada 100644
+--- a/tensorflow/core/kernels/BUILD
++++ b/tensorflow/core/kernels/BUILD
+@@ -3597,7 +3597,7 @@ tf_kernel_library(
+         "//conditions:default": [],
+     }) + mkl_deps() + if_cuda([
+         ":matmul_util",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+     ]) + if_cuda_or_rocm([
+         ":gpu_utils",
+     ]),
+@@ -3614,7 +3614,8 @@ cc_library(
+         "//tensorflow/core:lib",
+         "//tensorflow/core/platform:tensor_float_32_hdr_lib",
+         "//tensorflow/core/util:env_var",
+-        "//tensorflow/stream_executor/cuda:cublas_plugin",
++        "//tensorflow/stream_executor/cuda:cublas_lt_header",
++        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+     ]) + if_static(["//tensorflow/core/platform:tensor_float_32_utils"]),
+ )
+ 
+diff --git a/tensorflow/stream_executor/cuda/BUILD b/tensorflow/stream_executor/cuda/BUILD
+index 4d6a692f4feee..e26917de06799 100644
+--- a/tensorflow/stream_executor/cuda/BUILD
++++ b/tensorflow/stream_executor/cuda/BUILD
+@@ -260,6 +260,15 @@ alias(
+     visibility = ["//visibility:public"],
+ )
+ 
++cc_library(
++    name = "cublas_lt_header",
++    hdrs = ["cuda_blas_lt.h"],
++    visibility = ["//visibility:public"],
++    deps = [
++        "//tensorflow/stream_executor/platform",
++    ],
++)
++
+ cc_library(
+     name = "cublas_lt_stub",
+     srcs = if_cuda_is_configured(["cublasLt_stub.cc"]),
+diff --git a/tensorflow/stream_executor/cuda/cublas_11_0.inc b/tensorflow/stream_executor/cuda/cublas_11_0.inc
+index ebc4ec296934b..4ea4580413082 100644
+--- a/tensorflow/stream_executor/cuda/cublas_11_0.inc
++++ b/tensorflow/stream_executor/cuda/cublas_11_0.inc
+@@ -1,7 +1,6 @@
+ // Auto-generated, do not edit.
+ 
+ extern "C" {
+-
+ cublasStatus_t CUBLASWINAPI cublasCreate_v2(cublasHandle_t *handle) {
+   using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(cublasHandle_t *);
+   static auto func_ptr = LoadSymbol<FuncPtr>("cublasCreate_v2");
+@@ -119,6 +118,36 @@ cublasStatus_t CUBLASWINAPI cublasSetMathMode(cublasHandle_t handle,
+   return func_ptr(handle, mode);
+ }
+ 
++cublasStatus_t CUBLASWINAPI cublasGetSmCountTarget(cublasHandle_t handle,
++                                                   int *smCountTarget) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(cublasHandle_t, int *);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetSmCountTarget");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, smCountTarget);
++}
++
++cublasStatus_t CUBLASWINAPI cublasSetSmCountTarget(cublasHandle_t handle,
++                                                   int smCountTarget) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(cublasHandle_t, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasSetSmCountTarget");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, smCountTarget);
++}
++
++const char *CUBLASWINAPI cublasGetStatusName(cublasStatus_t status) {
++  using FuncPtr = const char *(CUBLASWINAPI *)(cublasStatus_t);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetStatusName");
++  if (!func_ptr) return "cublasGetStatusName symbol not found.";
++  return func_ptr(status);
++}
++
++const char *CUBLASWINAPI cublasGetStatusString(cublasStatus_t status) {
++  using FuncPtr = const char *(CUBLASWINAPI *)(cublasStatus_t);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetStatusString");
++  if (!func_ptr) return "cublasGetStatusString symbol not found.";
++  return func_ptr(status);
++}
++
+ cublasStatus_t CUBLASWINAPI cublasLoggerConfigure(int logIsOn, int logToStdOut,
+                                                   int logToStdErr,
+                                                   const char *logFileName) {
+@@ -1976,6 +2005,141 @@ cublasZhpr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n,
+   return func_ptr(handle, uplo, n, alpha, x, incx, y, incy, AP);
+ }
+ 
++cublasStatus_t CUBLASWINAPI cublasSgemvBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const float *alpha, /* host or device pointer */
++    const float *const Aarray[], int lda, const float *const xarray[], int incx,
++    const float *beta, /* host or device pointer */
++    float *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const float *,
++      const float *const[], int, const float *const[], int, const float *,
++      float *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasSgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasDgemvBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const double *alpha, /* host or device pointer */
++    const double *const Aarray[], int lda, const double *const xarray[],
++    int incx, const double *beta, /* host or device pointer */
++    double *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const double *,
++      const double *const[], int, const double *const[], int, const double *,
++      double *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasDgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasCgemvBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const cuComplex *alpha, /* host or device pointer */
++    const cuComplex *const Aarray[], int lda, const cuComplex *const xarray[],
++    int incx, const cuComplex *beta, /* host or device pointer */
++    cuComplex *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuComplex *,
++      const cuComplex *const[], int, const cuComplex *const[], int,
++      const cuComplex *, cuComplex *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasCgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI
++cublasZgemvBatched(cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++                   const cuDoubleComplex *alpha, /* host or device pointer */
++                   const cuDoubleComplex *const Aarray[], int lda,
++                   const cuDoubleComplex *const xarray[], int incx,
++                   const cuDoubleComplex *beta, /* host or device pointer */
++                   cuDoubleComplex *const yarray[], int incy, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuDoubleComplex *,
++      const cuDoubleComplex *const[], int, const cuDoubleComplex *const[], int,
++      const cuDoubleComplex *, cuDoubleComplex *const[], int, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasZgemvBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, Aarray, lda, xarray, incx, beta,
++                  yarray, incy, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasSgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const float *alpha,                             /* host or device pointer */
++    const float *A, int lda, long long int strideA, /* purposely signed */
++    const float *x, int incx, long long int stridex,
++    const float *beta, /* host or device pointer */
++    float *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const float *, const float *,
++      int, long long, const float *, int, long long, const float *, float *,
++      int, long long, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasSgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasDgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const double *alpha, /* host or device pointer */
++    const double *A, int lda, long long int strideA, /* purposely signed */
++    const double *x, int incx, long long int stridex,
++    const double *beta, /* host or device pointer */
++    double *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const double *,
++      const double *, int, long long, const double *, int, long long,
++      const double *, double *, int, long long, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasDgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasCgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const cuComplex *alpha, /* host or device pointer */
++    const cuComplex *A, int lda, long long int strideA, /* purposely signed */
++    const cuComplex *x, int incx, long long int stridex,
++    const cuComplex *beta, /* host or device pointer */
++    cuComplex *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuComplex *,
++      const cuComplex *, int, long long, const cuComplex *, int, long long,
++      const cuComplex *, cuComplex *, int, long long, int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasCgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
++cublasStatus_t CUBLASWINAPI cublasZgemvStridedBatched(
++    cublasHandle_t handle, cublasOperation_t trans, int m, int n,
++    const cuDoubleComplex *alpha, /* host or device pointer */
++    const cuDoubleComplex *A, int lda,
++    long long int strideA, /* purposely signed */
++    const cuDoubleComplex *x, int incx, long long int stridex,
++    const cuDoubleComplex *beta, /* host or device pointer */
++    cuDoubleComplex *y, int incy, long long int stridey, int batchCount) {
++  using FuncPtr = cublasStatus_t(CUBLASWINAPI *)(
++      cublasHandle_t, cublasOperation_t, int, int, const cuDoubleComplex *,
++      const cuDoubleComplex *, int, long long, const cuDoubleComplex *, int,
++      long long, const cuDoubleComplex *, cuDoubleComplex *, int, long long,
++      int);
++  static auto func_ptr = LoadSymbol<FuncPtr>("cublasZgemvStridedBatched");
++  if (!func_ptr) return GetSymbolNotFoundError();
++  return func_ptr(handle, trans, m, n, alpha, A, lda, strideA, x, incx, stridex,
++                  beta, y, incy, stridey, batchCount);
++}
++
+ cublasStatus_t CUBLASWINAPI cublasSgemm_v2(
+     cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+     int m, int n, int k, const float *alpha, /* host or device pointer */
+
+From f095350e06d6f7d62b0b6d986f22450201dd3325 Mon Sep 17 00:00:00 2001
+From: Trevor Morris <tmorris@nvidia.com>
+Date: Tue, 26 Jul 2022 11:47:26 -0700
+Subject: [PATCH 2/4] Remove duplicate stub
+
+---
+ tensorflow/stream_executor/cuda/cublas_11_0.inc | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/tensorflow/stream_executor/cuda/cublas_11_0.inc b/tensorflow/stream_executor/cuda/cublas_11_0.inc
+index 4ea4580413082..d287a91c56221 100644
+--- a/tensorflow/stream_executor/cuda/cublas_11_0.inc
++++ b/tensorflow/stream_executor/cuda/cublas_11_0.inc
+@@ -5194,11 +5194,4 @@ void CUBLASWINAPI cublasZtrmm(char side, char uplo, char transa, char diag,
+   return func_ptr(side, uplo, transa, diag, m, n, alpha, A, lda, B, ldb);
+ }
+ 
+-CUBLASAPI const char* CUBLASWINAPI cublasGetStatusString(cublasStatus_t status) {
+-  using FuncPtr = const char*(CUBLASWINAPI *)(cublasStatus_t);
+-  static auto func_ptr = LoadSymbol<FuncPtr>("cublasGetStatusString");
+-  if (!func_ptr) LogFatalSymbolNotFound("cublasGetStatusString");
+-  return func_ptr(status);
+-}
+-
+ }  // extern "C"
+
+From 7810dd450112a623ac549563dd741c854333d630 Mon Sep 17 00:00:00 2001
+From: Trevor Morris <tmorris@nvidia.com>
+Date: Tue, 26 Jul 2022 14:51:46 -0700
+Subject: [PATCH 3/4] Add missing header
+
+---
+ tensorflow/stream_executor/cuda/BUILD | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/stream_executor/cuda/BUILD b/tensorflow/stream_executor/cuda/BUILD
+index e26917de06799..3bd859c49d3fc 100644
+--- a/tensorflow/stream_executor/cuda/BUILD
++++ b/tensorflow/stream_executor/cuda/BUILD
+@@ -262,7 +262,10 @@ alias(
+ 
+ cc_library(
+     name = "cublas_lt_header",
+-    hdrs = ["cuda_blas_lt.h"],
++    hdrs = [
++        "cuda_blas_lt.h",
++        "cuda_blas_utils.h",
++    ],
+     visibility = ["//visibility:public"],
+     deps = [
+         "//tensorflow/stream_executor/platform",
+
+From e5222f7d7d0a9baa03b00385d8f1682c8ad69c3a Mon Sep 17 00:00:00 2001
+From: Trevor Morris <tmorris@nvidia.com>
+Date: Fri, 5 Aug 2022 11:20:31 -0700
+Subject: [PATCH 4/4] Add check_deps to prevent further duplication
+
+---
+ tensorflow/stream_executor/cuda/BUILD | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/stream_executor/cuda/BUILD b/tensorflow/stream_executor/cuda/BUILD
+index 3bd859c49d3fc..94a243907f686 100644
+--- a/tensorflow/stream_executor/cuda/BUILD
++++ b/tensorflow/stream_executor/cuda/BUILD
+@@ -2,7 +2,7 @@
+ #   CUDA-platform specific StreamExecutor support code.
+ 
+ load("//tensorflow:tensorflow.bzl", "tf_cc_test", "tf_copts", "tf_cuda_cc_test")
+-load("//tensorflow:tensorflow.bzl", "filegroup")
++load("//tensorflow:tensorflow.bzl", "check_deps", "filegroup")
+ load(
+     "//tensorflow/stream_executor:build_defs.bzl",
+     "stream_executor_friends",
+@@ -701,6 +701,30 @@ cc_library(
+     alwayslink = 1,
+ )
+ 
++# To avoid duplication, check that the C++ or python library does not depend on
++# the stream executor cuda plugins. Targets that want to use cuda APIs should
++# instead depend on the dummy plugins in //tensorflow/core/platform/default/build_config
++# and use header only targets.
++check_deps(
++    name = "cuda_plugins_check_deps",
++    disallowed_deps = if_static(
++        [],
++        otherwise = [
++            ":all_runtime",
++            ":cuda_driver",
++            ":cuda_platform",
++            ":cudnn_plugin",
++            ":cufft_plugin",
++            ":curand_plugin",
++            "//tensorflow/stream_executor:cuda_platform",
++        ],
++    ),
++    deps = [
++        "//tensorflow:tensorflow_cc",
++        "//tensorflow/python:pywrap_tensorflow_internal",
++    ],
++)
++
+ tf_cuda_cc_test(
+     name = "redzone_allocator_test",
+     srcs = ["redzone_allocator_test.cc"],

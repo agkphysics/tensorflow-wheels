@@ -1,0 +1,46 @@
+diff --git a/third_party/protobuf/protobuf.patch b/third_party/protobuf/protobuf.patch
+index 1aae0459185..9ad6f189469 100644
+--- a/third_party/protobuf/protobuf.patch
++++ b/third_party/protobuf/protobuf.patch
+@@ -168,6 +168,41 @@ index e0653321f..4156a1275 100644
+      grpc_cpp_plugin = None
+      if use_grpc_plugin:
+          grpc_cpp_plugin = "//external:grpc_cpp_plugin"
++diff --git a/python/google/protobuf/pyext/descriptor.cc b/python/google/protobuf/pyext/descriptor.cc
++index 1637f83a3..69368d4cf 100644
++--- a/python/google/protobuf/pyext/descriptor.cc
+++++ b/python/google/protobuf/pyext/descriptor.cc
++@@ -105,18 +105,18 @@ bool _CalledFromGeneratedFile(int stacklevel) {
++     return false;
++   }
++   while (stacklevel-- > 0) {
++-    frame = frame->f_back;
+++    frame = PyFrame_GetBack(frame);
++     if (frame == NULL) {
++       return false;
++     }
++   }
++ 
++-  if (frame->f_code->co_filename == NULL) {
+++  if (PyFrame_GetCode(frame)->co_filename == NULL) {
++     return false;
++   }
++   char* filename;
++   Py_ssize_t filename_size;
++-  if (PyString_AsStringAndSize(frame->f_code->co_filename,
+++  if (PyString_AsStringAndSize(PyFrame_GetCode(frame)->co_filename,
++                                &filename, &filename_size) < 0) {
++     // filename is not a string.
++     PyErr_Clear();
++@@ -137,7 +137,7 @@ bool _CalledFromGeneratedFile(int stacklevel) {
++     return false;
++   }
++ 
++-  if (frame->f_globals != frame->f_locals) {
+++  if (PyFrame_GetGlobals(frame) != PyFrame_GetLocals(frame)) {
++     // Not at global module scope
++     return false;
++   }
+ diff --git a/python/google/protobuf/pyext/message.cc b/python/google/protobuf/pyext/message.cc
+ index 3530a9b37..c31fa8fcc 100644
+ --- a/python/google/protobuf/pyext/message.cc

@@ -1,0 +1,32 @@
+From e9ce4675a71c5205314f574f76b8353fdb421a87 Mon Sep 17 00:00:00 2001
+From: Peter Hawkins <phawkins@google.com>
+Date: Fri, 12 Aug 2022 12:16:02 -0700
+Subject: [PATCH] Update pybind11 to 2.10.0.
+
+2.10.0 is necessary for Python 3.11 compatibility, Python 3.11 final is due for release 2022-10-03 (https://peps.python.org/pep-0664/).
+
+PiperOrigin-RevId: 467266397
+---
+ tensorflow/workspace2.bzl | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/tensorflow/workspace2.bzl b/tensorflow/workspace2.bzl
+index d46fab64b41c3..20078033e2a23 100644
+--- a/tensorflow/workspace2.bzl
++++ b/tensorflow/workspace2.bzl
+@@ -843,12 +843,11 @@ def _tf_repositories():
+         urls = tf_mirror_urls("https://github.com/nlohmann/json/archive/v3.10.5.tar.gz"),
+     )
+
+-    # Pybind11 2.9.x causes seg faults in TF Text, see cl/442586909
+     tf_http_archive(
+         name = "pybind11",
+-        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.8.1.tar.gz"),
+-        sha256 = "f1bcc07caa568eb312411dde5308b1e250bd0e1bc020fae855bf9f43209940cc",
+-        strip_prefix = "pybind11-2.8.1",
++        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.10.0.tar.gz"),
++        sha256 = "eacf582fa8f696227988d08cfc46121770823839fe9e301a20fbce67e7cd70ec",
++        strip_prefix = "pybind11-2.10.0",
+         build_file = "//third_party:pybind11.BUILD",
+         system_build_file = "//third_party/systemlibs:pybind11.BUILD",
+     )

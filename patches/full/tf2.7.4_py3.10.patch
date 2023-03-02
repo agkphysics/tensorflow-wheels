@@ -1,0 +1,84 @@
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+index 5afb63807f1..002406cf9eb 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+@@ -52,14 +52,8 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+ 
+ #if NV_TENSORRT_MAJOR < 7
+ #error TensorRT version earlier than 7 is not supported.
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_1_0.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 1
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_1.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_2.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_8_0.inc"
++#elif NV_TENSORRT_MAJOR == 7 || NV_TENSORRT_MAJOR == 8
++#include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_0.inc"
+ #else
+ #error This version of TensorRT is not supported.
+ #endif
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+index 04999d04766..a0a11766cd3 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+@@ -52,13 +52,9 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+ 
+ #if NV_TENSORRT_MAJOR < 7
+ #error TensorRT version earlier than 7 is not supported.
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 0
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_1_0.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 1
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_1.inc"
+-#elif NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 2
+-#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_2.inc"
+-#elif NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR == 0
++#elif NV_TENSORRT_MAJOR == 7
++#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_0.inc"
++#elif NV_TENSORRT_MAJOR == 8
+ #include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_8_0.inc"
+ #else
+ #error This version of TensorRT is not supported.
+diff --git a/third_party/gpus/cuda_configure.bzl b/third_party/gpus/cuda_configure.bzl
+index ed8ba3d5205..962a75b5eb2 100644
+--- a/third_party/gpus/cuda_configure.bzl
++++ b/third_party/gpus/cuda_configure.bzl
+@@ -710,7 +710,7 @@ def _get_cuda_config(repository_ctx, find_cuda_config_script):
+         cuda_version_major = cuda_major,
+         cudart_version = cudart_version,
+         cublas_version = cublas_version,
+-        cusolver_version = cusolver_version,
++        cusolver_version = "11",
+         curand_version = curand_version,
+         cufft_version = cufft_version,
+         cusparse_version = cusparse_version,
+diff --git a/third_party/protobuf/protobuf.patch b/third_party/protobuf/protobuf.patch
+index 8ce4a843759..bb779baf75b 100644
+--- a/third_party/protobuf/protobuf.patch
++++ b/third_party/protobuf/protobuf.patch
+@@ -40,4 +40,22 @@ index e0653321f..253d9cbb5 100644
+ +    deps = depset(deps).to_list()
+ 
+      if not ctx.attr.gen_cc and not ctx.attr.gen_py and not ctx.executable.plugin:
+-         return struct(
+\ No newline at end of file
++         return struct(
++diff --git a/python/google/protobuf/pyext/message.cc b/python/google/protobuf/pyext/message.cc
++index 3530a9b37..c31fa8fcc 100644
++--- a/python/google/protobuf/pyext/message.cc
+++++ b/python/google/protobuf/pyext/message.cc
++@@ -2991,8 +2991,12 @@ bool InitProto2MessageModule(PyObject *m) {
++         reinterpret_cast<PyObject*>(
++             &RepeatedCompositeContainer_Type));
++
++-    // Register them as collections.Sequence
+++    // Register them as MutableSequence.
+++#if PY_MAJOR_VERSION >= 3
+++    ScopedPyObjectPtr collections(PyImport_ImportModule("collections.abc"));
+++#else
++     ScopedPyObjectPtr collections(PyImport_ImportModule("collections"));
+++#endif
++     if (collections == NULL) {
++       return false;
++     }

@@ -1,0 +1,74 @@
+diff --git a/tensorflow/python/lib/core/bfloat16.cc b/tensorflow/python/lib/core/bfloat16.cc
+index 2f4031df139..a8ec05d2f4b 100644
+--- a/tensorflow/python/lib/core/bfloat16.cc
++++ b/tensorflow/python/lib/core/bfloat16.cc
+@@ -1642,7 +1642,11 @@ bool RegisterNumpyDtype(PyObject* numpy) {
+   arr_funcs.argmax = NPyCustomFloat_ArgMaxFunc<T>;
+   arr_funcs.argmin = NPyCustomFloat_ArgMinFunc<T>;
+
++#if PY_VERSION_HEX < 0x030900A4 && !defined(Py_SET_TYPE)
+   Py_TYPE(&CustomFloatTypeDescriptor<T>::npy_descr) = &PyArrayDescr_Type;
++#else
++  Py_SET_TYPE(&CustomFloatTypeDescriptor<T>::npy_descr, &PyArrayDescr_Type);
++#endif
+   TypeDescriptor<T>::npy_type =
+       PyArray_RegisterDataType(&CustomFloatTypeDescriptor<T>::npy_descr);
+   TypeDescriptor<T>::type_ptr = &TypeDescriptor<T>::type;
+diff --git a/tensorflow/python/profiler/internal/python_hooks.cc b/tensorflow/python/profiler/internal/python_hooks.cc
+index 62b1dddc92f..39bc0cd4966 100644
+--- a/tensorflow/python/profiler/internal/python_hooks.cc
++++ b/tensorflow/python/profiler/internal/python_hooks.cc
+@@ -274,8 +274,14 @@ void PythonHookContext::ProfileFast(PyFrameObject* frame, int what,
+
+   switch (what) {
+     case PyTrace_CALL: {
++#if PY_VERSION_HEX < 0x030b0000
+       PyCodeObject* f_code = frame->f_code;
+       thread_traces.active.emplace(now, 0, f_code);
++#else   // PY_VERSION_HEX < 0x030b0000
++      PyCodeObject* f_code = PyFrame_GetCode(frame);
++      thread_traces.active.emplace(now, 0, f_code);
++      Py_XDECREF(f_code);
++#endif  // PY_VERSION_HEX < 0x030b0000
+       break;
+     }
+     case PyTrace_RETURN:
+@@ -286,8 +292,14 @@ void PythonHookContext::ProfileFast(PyFrameObject* frame, int what,
+         thread_traces.completed.emplace_back(std::move(entry));
+         thread_traces.active.pop();
+       } else if (options_.include_incomplete_events) {
++#if PY_VERSION_HEX < 0x030b0000
+         PyCodeObject* f_code = frame->f_code;
+         thread_traces.completed.emplace_back(start_timestamp_ns_, now, f_code);
++#else   // PY_VERSION_HEX < 0x030b0000
++        PyCodeObject* f_code = PyFrame_GetCode(frame);
++        thread_traces.completed.emplace_back(start_timestamp_ns_, now, f_code);
++        Py_XDECREF(f_code);
++#endif  // PY_VERSION_HEX < 0x030b0000
+       }
+       break;
+     }
+diff --git a/tensorflow/python/util/stack_trace.h b/tensorflow/python/util/stack_trace.h
+index 899603c121e..070f46c8e0c 100644
+--- a/tensorflow/python/util/stack_trace.h
++++ b/tensorflow/python/util/stack_trace.h
+@@ -61,10 +61,19 @@ class StackTrace final {
+     if (limit == -1) limit = std::numeric_limits<int>::max();
+
+     StackTrace result;
++#if PY_VERSION_HEX >= 0x030B0000
++    PyFrameObject* frame = PyThreadState_GetFrame(PyThreadState_GET());
++#else
+     const PyFrameObject* frame = PyThreadState_GET()->frame;
++#endif
+     int i = 0;
++#if PY_VERSION_HEX >= 0x030B0000
++    for (; i < limit && frame != nullptr; PyFrame_GetBack(frame), ++i) {
++      PyCodeObject* code_obj = PyFrame_GetCode(frame);
++#else
+     for (; i < limit && frame != nullptr; frame = frame->f_back, ++i) {
+       PyCodeObject* code_obj = frame->f_code;
++#endif
+       DCHECK(code_obj != nullptr);
+
+       Py_INCREF(code_obj);
