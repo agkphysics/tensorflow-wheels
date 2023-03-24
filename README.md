@@ -14,8 +14,8 @@ compatibility than the Ubuntu 20.04 ones.
 
 | TF | Python | GPU | CUDA | cuDNN | AVX2 | MKL/oneDNN | TensorRT | Links |
 |-|-|-|-|-|-|-|-|-|
-| 2.7.4, 2.8.4, 2.9.3, 2.10.1, 2.11.0 | 3.7-3.11 | 5.2-9.0 | 11.8 | 8 | :heavy_check_mark: | :heavy_check_mark: | 8 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.7-2.11_gpu_py3x_cuda118_cudnn8_avx2_mkl_trt8) |
-| 2.7.4 | 3.6 | 5.2-9.0 | 11.8 | 8 | :heavy_check_mark: | :heavy_check_mark: | 8 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.7-2.11_gpu_py3x_cuda118_cudnn8_avx2_mkl_trt8) |
+| 2.7.4, 2.8.4, 2.9.3, 2.10.1, 2.11.0 | 3.7-3.11 | 5.2-9.0 | 11.8 | 8.8 | :heavy_check_mark: | :heavy_check_mark: | 8.5 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.7-2.11_gpu_py3x_cuda118_cudnn8_avx2_mkl_trt8) |
+| 2.7.4 | 3.6 | 5.2-9.0 | 11.8 | 8.8 | :heavy_check_mark: | :heavy_check_mark: | 8.5 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.7-2.11_gpu_py3x_cuda118_cudnn8_avx2_mkl_trt8) |
 
 
 ## Ubuntu 20.04 wheels
