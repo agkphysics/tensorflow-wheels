@@ -1,0 +1,89 @@
+diff --git a/tensorflow/compiler/tf2tensorrt/common/utils.cc b/tensorflow/compiler/tf2tensorrt/common/utils.cc
+index 69ecc84dca7..92166c2e79e 100644
+--- a/tensorflow/compiler/tf2tensorrt/common/utils.cc
++++ b/tensorflow/compiler/tf2tensorrt/common/utils.cc
+@@ -213,6 +213,11 @@ std::ostream& operator<<(std::ostream& os, const nvinfer1::DataType& v) {
+     case nvinfer1::DataType::kHALF:
+       os << "kHalf";
+       break;
++#if IS_TRT_VERSION_GE(8, 6, 0, 0)
++    case nvinfer1::DataType::kFP8:
++      os << "kFP8";
++      break;
++#endif
+     case nvinfer1::DataType::kINT8:
+       os << "kINT8";
+       break;
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/utils.cc b/tensorflow/compiler/tf2tensorrt/convert/utils.cc
+index ef61ea3fce6..f2cc8be2fd0 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/utils.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/utils.cc
+@@ -69,6 +69,10 @@ string DebugString(const nvinfer1::DataType trt_dtype) {
+ #if IS_TRT_VERSION_GE(8, 5, 0, 0)
+     case nvinfer1::DataType::kUINT8:
+       return "kUINT8";
++#endif
++#if IS_TRT_VERSION_GE(8, 6, 0, 0)
++    case nvinfer1::DataType::kFP8:
++      return "kFP8";
+ #endif
+     default:
+       return "Invalid TRT data type";
+@@ -204,6 +208,11 @@ Status TrtTypeToTfType(nvinfer1::DataType trt_type, DataType* tf_type) {
+     case nvinfer1::DataType::kUINT8:
+       *tf_type = DT_UINT8;
+       break;
++#endif
++#if IS_TRT_VERSION_GE(8, 6, 0, 0)
++    case nvinfer1::DataType::kFP8:
++      *tf_type = DT_FLOAT8_E4M3FN;
++      break;
+ #endif
+     default:
+       return errors::InvalidArgument("Invalid TRT data type");
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/weights.cc b/tensorflow/compiler/tf2tensorrt/convert/weights.cc
+index c608291a0ae..da2157096b5 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/weights.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/weights.cc
+@@ -68,6 +68,9 @@ size_t TRT_ShapedWeights::size_bytes() const {
+       break;
+ #if IS_TRT_VERSION_GE(8, 5, 0, 0)
+     case nvinfer1::DataType::kUINT8:
++#endif
++#if IS_TRT_VERSION_GE(8, 6, 0, 0)
++    case nvinfer1::DataType::kFP8:
+ #endif
+     case nvinfer1::DataType::kINT8:
+     case nvinfer1::DataType::kBOOL:
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc b/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc
+index 110a32b1f2f..798ebd8bd0c 100755
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc
+@@ -108,6 +108,10 @@ Status SetupBindings(nvinfer1::ICudaEngine* cuda_engine, const Tensor& tensor,
+     case nvinfer1::DataType::kUINT8:
+       buffers[binding_index] = const_cast<uint8*>(tensor.flat<uint8>().data());
+       break;
++#endif
++#if IS_TRT_VERSION_GE(8, 6, 0, 0)
++    case nvinfer1::DataType::kFP8:
++      return errors::Internal("FP8 inputs are not supported yet!");
+ #endif
+     default:
+       return errors::Internal("Unknown TRT data type: ",
+diff --git a/tensorflow/workspace2.bzl b/tensorflow/workspace2.bzl
+index 1261273bc92..0a9d755af0f 100644
+--- a/tensorflow/workspace2.bzl
++++ b/tensorflow/workspace2.bzl
+@@ -172,9 +172,9 @@ def _tf_repositories():
+         name = "cudnn_frontend_archive",
+         build_file = "//third_party:cudnn_frontend.BUILD",
+         patch_file = ["//third_party:cudnn_frontend_header_fix.patch"],
+-        sha256 = "3c7b842cd67989810955b220fa1116e7e2ed10660a8cfb632118146a64992c30",
+-        strip_prefix = "cudnn-frontend-0.7.3",
+-        urls = tf_mirror_urls("https://github.com/NVIDIA/cudnn-frontend/archive/refs/tags/v0.7.3.zip"),
++        sha256 = "d8dba9e2607a0c256aa8eacb45b39986ab6f3f24a4d431d4397047a3cb0cd4fb",
++        strip_prefix = "cudnn-frontend-0.9",
++        urls = tf_mirror_urls("https://github.com/NVIDIA/cudnn-frontend/archive/refs/tags/v0.9.zip"),
+     )
+ 
+     tf_http_archive(

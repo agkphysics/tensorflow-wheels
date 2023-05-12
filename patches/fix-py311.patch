@@ -16,16 +16,16 @@ index fb88b6a922a5a..a1118644f3896 100644
 --- a/tensorflow/python/keras/utils/tf_inspect.py
 +++ b/tensorflow/python/keras/utils/tf_inspect.py
 @@ -20,7 +20,10 @@
-
+ 
  from tensorflow.python.util import tf_decorator
-
+ 
 -ArgSpec = _inspect.ArgSpec
 +try:
 +  ArgSpec = _inspect.ArgSpec
 +except:
 +  pass
-
-
+ 
+ 
  if hasattr(_inspect, 'FullArgSpec'):
 @@ -64,11 +67,21 @@ def _getargspec(target):
        from FullArgSpec.
@@ -59,7 +59,7 @@ index 91e592cecb1d4..5c95a6d058658 100644
 --- a/tensorflow/python/util/dispatch.py
 +++ b/tensorflow/python/util/dispatch.py
 @@ -441,7 +441,12 @@ def _add_name_scope_wrapper(func, api_signature):
-
+ 
    func_signature = tf_inspect.signature(func)
    func_argspec = tf_inspect.getargspec(func)
 -  if "name" in func_signature.parameters or func_argspec.keywords is not None:
@@ -70,10 +70,10 @@ index 91e592cecb1d4..5c95a6d058658 100644
 +    kw = func_argspec.varkw
 +  if "name" in func_signature.parameters or kw is not None:
      return func  # No wrapping needed (already has name parameter).
-
+ 
    name_index = list(api_signature.parameters).index("name")
 @@ -551,7 +556,12 @@ def add_type_based_api_dispatcher(target):
-
+ 
    _, unwrapped = tf_decorator.unwrap(target)
    target_argspec = tf_inspect.getargspec(unwrapped)
 -  if target_argspec.varargs or target_argspec.keywords:
@@ -99,7 +99,31 @@ index 91e592cecb1d4..5c95a6d058658 100644
 +  if (func_argspec.varargs is not None and kw is not None
        and not func_argspec.args):
      return
-
+ 
+diff --git a/tensorflow/python/util/stack_trace.h b/tensorflow/python/util/stack_trace.h
+index 375e96a7620e3..d5261a171d741 100644
+--- a/tensorflow/python/util/stack_trace.h
++++ b/tensorflow/python/util/stack_trace.h
+@@ -61,10 +61,19 @@ class StackTrace final {
+     if (limit == -1) limit = std::numeric_limits<int>::max();
+ 
+     StackTrace result;
++#if PY_VERSION_HEX >= 0x030B0000
++    PyFrameObject* frame = PyThreadState_GetFrame(PyThreadState_GET());
++#else
+     const PyFrameObject* frame = PyThreadState_GET()->frame;
++#endif
+     int i = 0;
++#if PY_VERSION_HEX >= 0x030B0000
++    for (; i < limit && frame != nullptr; PyFrame_GetBack(frame), ++i) {
++      PyCodeObject* code_obj = PyFrame_GetCode(frame);
++#else
+     for (; i < limit && frame != nullptr; frame = frame->f_back, ++i) {
+       PyCodeObject* code_obj = frame->f_code;
++#endif
+       DCHECK(code_obj != nullptr);
+ 
+       Py_INCREF(code_obj);
 diff --git a/tensorflow/python/util/tf_inspect.py b/tensorflow/python/util/tf_inspect.py
 index 183647b2d0ad4..c51228efbe92c 100644
 --- a/tensorflow/python/util/tf_inspect.py
@@ -107,14 +131,14 @@ index 183647b2d0ad4..c51228efbe92c 100644
 @@ -35,7 +35,10 @@ def signature(obj, *, follow_wrapped=True):
  Parameter = _inspect.Parameter
  Signature = _inspect.Signature
-
+ 
 -ArgSpec = _inspect.ArgSpec
 +try:
 +  ArgSpec = _inspect.ArgSpec
 +except:
 +  pass
-
-
+ 
+ 
  if hasattr(_inspect, 'FullArgSpec'):
 @@ -79,11 +82,21 @@ def _getargspec(target):
        from FullArgSpec.
