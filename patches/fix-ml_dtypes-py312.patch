@@ -1,0 +1,803 @@
+From 075650f5b215394b3e124ba269da53ff228fe15b Mon Sep 17 00:00:00 2001
+From: Antonio Sanchez <cantonios@google.com>
+Date: Wed, 6 Sep 2023 15:28:30 -0700
+Subject: [PATCH] Simplify import of ml_dtypes in C++.
+
+We actually don't need the pywrap module if we import types directly
+from the python ml_dtypes package, both in python and C++ (via pybind11).
+Removed the custom pywrap_ml_dtypes library, and directly import
+`ml_dtypes` from python.
+
+PiperOrigin-RevId: 563233368
+---
+ tensorflow/python/BUILD                       |   7 +-
+ tensorflow/python/framework/BUILD             |   8 +-
+ tensorflow/python/framework/dtypes.py         |   8 +-
+ tensorflow/python/lib/core/ndarray_tensor.cc  |   8 +-
+ .../python/lib/core/ndarray_tensor_bridge.cc  |   8 +-
+ tensorflow/tensorflow.bzl                     |   7 -
+ .../tools/pip_package/build_pip_package.sh    |  14 --
+ .../third_party/tsl/tsl/python/lib/core/BUILD |  58 +------
+ .../tsl/tsl/python/lib/core/ml_dtypes.cc      | 164 +++---------------
+ .../tsl/tsl/python/lib/core/ml_dtypes.h       |  38 ++--
+ .../tsl/python/lib/core/ml_dtypes_wrapper.cc  |  31 ----
+ third_party/xla/xla/python_api/BUILD          |   1 -
+ third_party/xla/xla/python_api/types_.py      | 158 ++++++++---------
+ 13 files changed, 152 insertions(+), 358 deletions(-)
+ delete mode 100644 third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes_wrapper.cc
+
+diff --git a/tensorflow/python/BUILD b/tensorflow/python/BUILD
+index 3263f3c3ad285..55c421f5202cf 100644
+--- a/tensorflow/python/BUILD
++++ b/tensorflow/python/BUILD
+@@ -2,9 +2,10 @@
+ # Public targets:
+ #  ":platform" - Low-level and platform-specific Python code.
+ 
+-# Placeholder: load py_proto_library
+ load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+ load("//tensorflow:strict.default.bzl", "py_strict_library")
++
++# Placeholder: load py_proto_library
+ load("//tensorflow:tensorflow.bzl", "VERSION", "cc_header_only_library", "clean_dep", "if_google", "if_mlir", "if_oss", "if_windows", "if_xla_available", "tf_enable_mlir_bridge", "tf_python_pybind_static_deps", "tsl_async_value_deps")
+ load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable", "pywrap_tensorflow_macro", "tf_external_workspace_visible", "tf_monitoring_python_deps", "tf_pybind_cc_library_wrapper", "tf_python_pybind_extension")
+ load(
+@@ -642,7 +643,7 @@ py_strict_library(
+ pywrap_tensorflow_macro(
+     name = "pywrap_tensorflow_internal",
+     srcs = ["pywrap_tensorflow_internal.cc"],
+-    dynamic_deps = ["@local_tsl//tsl/python/lib/core:ml_dtypes.so"] + select({
++    dynamic_deps = select({
+         "//tensorflow:macos": [
+             "//tensorflow:libtensorflow_cc.%s.dylib" % VERSION,
+             "//tensorflow:libtensorflow_framework.%s.dylib" % VERSION,
+@@ -827,7 +828,7 @@ pywrap_tensorflow_macro(
+         "@com_google_absl//absl/types:span",
+         "@local_tsl//tsl/profiler/rpc:profiler_server_impl",
+         "@local_tsl//tsl/profiler/rpc/client:profiler_client_impl",
+-        "@local_tsl//tsl/python/lib/core",
++        "@local_tsl//tsl/python/lib/core:numpy",
+         "@local_xla//xla/stream_executor:stream_executor_impl",
+     ] + if_static([
+         "//tensorflow/core/platform:tensor_float_32_utils",
+diff --git a/tensorflow/python/framework/BUILD b/tensorflow/python/framework/BUILD
+index 74517b3103171..6117aada9e3af 100644
+--- a/tensorflow/python/framework/BUILD
++++ b/tensorflow/python/framework/BUILD
+@@ -1,7 +1,9 @@
+ # python/framework package
+ 
+-# Placeholder: load py_proto_library
++load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+ load("//tensorflow:strict.default.bzl", "py_strict_library", "py_strict_test")
++
++# Placeholder: load py_proto_library
+ load(
+     "//tensorflow:tensorflow.bzl",
+     "if_not_windows",
+@@ -14,10 +16,9 @@ load(
+     "tf_kernel_library",
+ )
+ load("//tensorflow:tensorflow.default.bzl", "cuda_py_strict_test", "tf_py_strict_test", "tf_python_framework_friends", "tf_python_pybind_extension")
+-load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+-load("//tensorflow/python/tpu:tpu.bzl", "tpu_py_strict_test")
+ load("//tensorflow/core/platform:build_config.bzl", "pyx_library", "tf_additional_all_protos", "tf_additional_lib_deps", "tf_proto_library", "tf_protos_grappler")  # @unused
+ load("//tensorflow/core/platform:build_config_root.bzl", "if_static", "tf_additional_xla_deps_py")
++load("//tensorflow/python/tpu:tpu.bzl", "tpu_py_strict_test")
+ 
+ visibility = tf_python_framework_friends()
+ 
+@@ -483,7 +484,6 @@ py_strict_library(
+         "//tensorflow/python/types:doc_typealias",
+         "//tensorflow/python/util:tf_export",
+         "//tensorflow/tools/docs:doc_controls",
+-        "@local_tsl//tsl/python/lib/core:pywrap_ml_dtypes",
+         "@ml_dtypes",
+     ],
+ )
+diff --git a/tensorflow/python/framework/dtypes.py b/tensorflow/python/framework/dtypes.py
+index 9d008fca46718..0218293b8c121 100644
+--- a/tensorflow/python/framework/dtypes.py
++++ b/tensorflow/python/framework/dtypes.py
+@@ -18,6 +18,7 @@
+ import dataclasses
+ from typing import Type, Sequence, Optional
+ 
++import ml_dtypes
+ import numpy as np
+ 
+ from tensorflow.core.framework import types_pb2
+@@ -32,11 +33,10 @@
+ from tensorflow.python.types import trace
+ from tensorflow.core.function import trace_type
+ from tensorflow.tools.docs import doc_controls
+-from tsl.python.lib.core import pywrap_ml_dtypes
+ 
+-_np_bfloat16 = pywrap_ml_dtypes.bfloat16()
+-_np_float8_e4m3fn = pywrap_ml_dtypes.float8_e4m3fn()
+-_np_float8_e5m2 = pywrap_ml_dtypes.float8_e5m2()
++_np_bfloat16 = ml_dtypes.bfloat16
++_np_float8_e4m3fn = ml_dtypes.float8_e4m3fn
++_np_float8_e5m2 = ml_dtypes.float8_e5m2
+ 
+ 
+ class DTypeMeta(type(_dtypes.DType), abc.ABCMeta):
+diff --git a/tensorflow/python/lib/core/ndarray_tensor.cc b/tensorflow/python/lib/core/ndarray_tensor.cc
+index 4f9bf0283ac71..41e889e7a93e2 100644
+--- a/tensorflow/python/lib/core/ndarray_tensor.cc
++++ b/tensorflow/python/lib/core/ndarray_tensor.cc
+@@ -123,6 +123,8 @@ Status PyArrayDescr_to_TF_DataType(PyArray_Descr* descr,
+ 
+ Status PyArray_TYPE_to_TF_DataType(PyArrayObject* array,
+                                    TF_DataType* out_tf_datatype) {
++  const tsl::ml_dtypes::NumpyDtypes& custom_dtypes =
++      tsl::ml_dtypes::GetNumpyDtypes();
+   int pyarray_type = PyArray_TYPE(array);
+   PyArray_Descr* descr = PyArray_DESCR(array);
+   switch (pyarray_type) {
+@@ -181,7 +183,7 @@ Status PyArray_TYPE_to_TF_DataType(PyArrayObject* array,
+       // custom struct type.
+       return PyArrayDescr_to_TF_DataType(descr, out_tf_datatype);
+     default:
+-      if (pyarray_type == tsl::ml_dtypes::GetBfloat16TypeNum()) {
++      if (pyarray_type == custom_dtypes.bfloat16) {
+         *out_tf_datatype = TF_BFLOAT16;
+         break;
+       } else if (pyarray_type == NPY_ULONGLONG) {
+@@ -204,10 +206,10 @@ Status PyArray_TYPE_to_TF_DataType(PyArrayObject* array,
+         // be different on certain platforms.
+         *out_tf_datatype = TF_UINT32;
+         break;
+-      } else if (pyarray_type == tsl::ml_dtypes::GetFloat8E5m2TypeNum()) {
++      } else if (pyarray_type == custom_dtypes.float8_e5m2) {
+         *out_tf_datatype = TF_FLOAT8_E5M2;
+         break;
+-      } else if (pyarray_type == tsl::ml_dtypes::GetFloat8E4m3fnTypeNum()) {
++      } else if (pyarray_type == custom_dtypes.float8_e4m3fn) {
+         *out_tf_datatype = TF_FLOAT8_E4M3FN;
+         break;
+       }
+diff --git a/tensorflow/python/lib/core/ndarray_tensor_bridge.cc b/tensorflow/python/lib/core/ndarray_tensor_bridge.cc
+index 67877b0c69dbd..32ffaa4e6b635 100644
+--- a/tensorflow/python/lib/core/ndarray_tensor_bridge.cc
++++ b/tensorflow/python/lib/core/ndarray_tensor_bridge.cc
+@@ -119,6 +119,8 @@ PyTypeObject TensorReleaserType = {
+ 
+ Status TF_DataType_to_PyArray_TYPE(TF_DataType tf_datatype,
+                                    int* out_pyarray_type) {
++  const tsl::ml_dtypes::NumpyDtypes& custom_dtypes =
++      tsl::ml_dtypes::GetNumpyDtypes();
+   switch (tf_datatype) {
+     case TF_HALF:
+       *out_pyarray_type = NPY_FLOAT16;
+@@ -187,13 +189,13 @@ Status TF_DataType_to_PyArray_TYPE(TF_DataType tf_datatype,
+       *out_pyarray_type = NPY_INT32;
+       break;
+     case TF_BFLOAT16:
+-      *out_pyarray_type = tsl::ml_dtypes::GetBfloat16TypeNum();
++      *out_pyarray_type = custom_dtypes.bfloat16;
+       break;
+     case TF_FLOAT8_E5M2:
+-      *out_pyarray_type = tsl::ml_dtypes::GetFloat8E5m2TypeNum();
++      *out_pyarray_type = custom_dtypes.float8_e5m2;
+       break;
+     case TF_FLOAT8_E4M3FN:
+-      *out_pyarray_type = tsl::ml_dtypes::GetFloat8E4m3fnTypeNum();
++      *out_pyarray_type = custom_dtypes.float8_e4m3fn;
+       break;
+     default:
+       return errors::Internal("Tensorflow type ", tf_datatype,
+diff --git a/tensorflow/tensorflow.bzl b/tensorflow/tensorflow.bzl
+index fbcb9f78626b0..e3f543870fbae 100644
+--- a/tensorflow/tensorflow.bzl
++++ b/tensorflow/tensorflow.bzl
+@@ -2488,11 +2488,6 @@ def pywrap_tensorflow_macro_opensource(
+         cmd = "touch $@",
+     )
+ 
+-    # TODO(b/271333181): This should be done more generally on Windows for every dll dependency
+-    # (there is only one currently) that is not in the same directory, otherwise Python will fail to
+-    # link the pyd (which is just a dll) because of missing dependencies.
+-    _create_symlink("ml_dtypes.so", "@local_tsl//tsl/python/lib/core:ml_dtypes.so")
+-
+     _plain_py_library(
+         name = name,
+         srcs = [":" + name + ".py"],
+@@ -2500,8 +2495,6 @@ def pywrap_tensorflow_macro_opensource(
+         data = select({
+             clean_dep("//tensorflow:windows"): [
+                 ":" + cc_library_pyd_name,
+-                ":ml_dtypes.so",
+-                "@local_tsl//tsl/python/lib/core:ml_dtypes.so",
+             ],
+             "//conditions:default": [
+                 ":" + cc_shared_library_name,
+diff --git a/tensorflow/tools/pip_package/build_pip_package.sh b/tensorflow/tools/pip_package/build_pip_package.sh
+index e1f3ecf8f9892..7364cb7b49ad3 100755
+--- a/tensorflow/tools/pip_package/build_pip_package.sh
++++ b/tensorflow/tools/pip_package/build_pip_package.sh
+@@ -250,28 +250,14 @@ function prepare_src() {
+       find ${TMPDIR}/tensorflow/ -name "*.py" -type f -exec sed -i'' 's/from xla/from tensorflow.compiler.xla/' {} \;
+     fi
+     # Copy MKL libs over so they can be loaded at runtime
+-    # TODO(b/271299337): shared libraries that depend on libml_dtypes.so.so have
+-    # their NEEDED and RUNPATH set corresponding to a dependency on
+-    # RUNFILES/_solib_local/libtensorflow_Stsl_Spython_Slib_Score_Slibml_dtypes.so.so,
+-    # which is a symlink to tensorflow/include/external/local_tsl/tsl/python/lib/core/libml_dtypes.so in
+-    # the Bazel build tree. We do not export the file in _solib_local (nor
+-    # symlinks in general, I think Python wheels have poor support for them?)
+     so_lib_dir=$(ls $RUNFILES | grep solib)
+     if is_macos; then
+-      chmod +rw ${TMPDIR}/tensorflow/tsl/python/lib/core/pywrap_ml_dtypes.so
+       chmod +rw ${TMPDIR}/tensorflow/python/_pywrap_tensorflow_internal.so
+-      install_name_tool -change "@loader_path/../../../../../../${so_lib_dir}//libexternal_Slocal_Utsl_Stsl_Spython_Slib_Score_Slibml_Udtypes.so.dylib" "@loader_path/libml_dtypes.so.dylib" ${TMPDIR}/tensorflow/tsl/python/lib/core/pywrap_ml_dtypes.so
+-      install_name_tool -change "@loader_path/../../${so_lib_dir}//libexternal_Slocal_Utsl_Stsl_Spython_Slib_Score_Slibml_Udtypes.so.dylib" "@loader_path/../tsl/python/lib/core/libml_dtypes.so.dylib" ${TMPDIR}/tensorflow/python/_pywrap_tensorflow_internal.so
+     else
+-      chmod +rw ${TMPDIR}/tensorflow/tsl/python/lib/core/pywrap_ml_dtypes.so
+       chmod +rw ${TMPDIR}/tensorflow/python/_pywrap_tensorflow_internal.so
+       chmod +rw ${TMPDIR}/tensorflow/compiler/mlir/quantization/tensorflow/python/pywrap_quantize_model.so
+-      patchelf --replace-needed libexternal_Slocal_Utsl_Stsl_Spython_Slib_Score_Slibml_Udtypes.so.so libml_dtypes.so.so ${TMPDIR}/tensorflow/tsl/python/lib/core/pywrap_ml_dtypes.so
+-      patchelf --replace-needed libexternal_Slocal_Utsl_Stsl_Spython_Slib_Score_Slibml_Udtypes.so.so libml_dtypes.so.so ${TMPDIR}/tensorflow/python/_pywrap_tensorflow_internal.so
+-      patchelf --set-rpath $(patchelf --print-rpath ${TMPDIR}/tensorflow/tsl/python/lib/core/pywrap_ml_dtypes.so):\$ORIGIN ${TMPDIR}/tensorflow/tsl/python/lib/core/pywrap_ml_dtypes.so
+       patchelf --set-rpath $(patchelf --print-rpath ${TMPDIR}/tensorflow/python/_pywrap_tensorflow_internal.so):\$ORIGIN/../../tensorflow/tsl/python/lib/core ${TMPDIR}/tensorflow/python/_pywrap_tensorflow_internal.so
+       patchelf --set-rpath $(patchelf --print-rpath ${TMPDIR}/tensorflow/compiler/mlir/quantization/tensorflow/python/pywrap_quantize_model.so):\$ORIGIN/../../../../../python ${TMPDIR}/tensorflow/compiler/mlir/quantization/tensorflow/python/pywrap_quantize_model.so
+-      patchelf --shrink-rpath ${TMPDIR}/tensorflow/tsl/python/lib/core/pywrap_ml_dtypes.so
+       patchelf --shrink-rpath ${TMPDIR}/tensorflow/python/_pywrap_tensorflow_internal.so
+       patchelf --shrink-rpath ${TMPDIR}/tensorflow/compiler/mlir/quantization/tensorflow/python/pywrap_quantize_model.so
+     fi
+diff --git a/third_party/xla/third_party/tsl/tsl/python/lib/core/BUILD b/third_party/xla/third_party/tsl/tsl/python/lib/core/BUILD
+index b36333ffebdaa..988d0978542f5 100644
+--- a/third_party/xla/third_party/tsl/tsl/python/lib/core/BUILD
++++ b/third_party/xla/third_party/tsl/tsl/python/lib/core/BUILD
+@@ -1,16 +1,8 @@
+ # Description:
+ #   Implementation of custom numpy floats.
+ 
+-load("//tsl:tsl.bzl", "if_windows")
+-load("//tsl:tsl.default.bzl", "tsl_pybind_extension")
+-load("//tsl/platform:rules_cc.bzl", "cc_shared_library")
+-
+ package(
+     default_visibility = ["//visibility:public"],
+-    features = [
+-        # For ml_dtypes.so (see b/259896740)
+-        "windows_export_all_symbols",
+-    ],
+     licenses = ["notice"],
+ )
+ 
+@@ -30,10 +22,15 @@ cc_library(
+     name = "ml_dtypes_lib",
+     srcs = ["ml_dtypes.cc"],
+     hdrs = ["ml_dtypes.h"],
++    copts = ["-fexceptions"],  # Required for pybind11.
+     # Requires data dependency in order to load py module from C++.
+     data = [
+         "@ml_dtypes",
+     ],
++    features = [
++        "-use_header_modules",  # Required for pybind11.
++        "-parse_headers",
++    ],
+     visibility = ["//visibility:public"],
+     deps = [
+         "//third_party/python_runtime:headers",  # build_cleaner: keep; DNR: b/35864863
+@@ -42,41 +39,6 @@ cc_library(
+     ],
+ )
+ 
+-cc_shared_library(
+-    name = "ml_dtypes.so",
+-    roots = [":ml_dtypes_lib"],
+-    # TODO(tlongeri): If this is not explicitly specified, dependent DLLs will expect "ml_dtypes.so"
+-    # and we will generate "ml_dtypes.so.dll", for some reason
+-    shared_lib_name = if_windows("ml_dtypes.so", None),
+-    static_deps = [
+-        # TODO(ddunleavy): If cc_shared_library is ever not a noop in g3, change
+-        # this to be more specific.
+-        "//:__subpackages__",
+-        "@//:__subpackages__",
+-        "@com_google_absl//:__subpackages__",
+-        "@local_config_python//:__subpackages__",
+-        "@pybind11//:__subpackages__",
+-        "@nsync//:__subpackages__",
+-        "//tsl:__subpackages__",
+-    ],
+-)
+-
+-tsl_pybind_extension(
+-    name = "pywrap_ml_dtypes",
+-    srcs = ["ml_dtypes_wrapper.cc"],
+-    dynamic_deps = [":ml_dtypes.so"],
+-    static_deps = [
+-        "@//:__subpackages__",
+-        "@pybind11//:__subpackages__",
+-        "@local_config_python//:__subpackages__",
+-    ],
+-    deps = [
+-        ":ml_dtypes_lib",
+-        "//third_party/python_runtime:headers",
+-        "@pybind11",
+-    ],
+-)
+-
+ cc_library(
+     name = "numpy",
+     srcs = ["numpy.cc"],
+@@ -87,13 +49,3 @@ cc_library(
+         "//third_party/python_runtime:headers",
+     ],
+ )
+-
+-# Directory-level target.
+-cc_library(
+-    name = "core",
+-    visibility = ["//visibility:public"],
+-    deps = [
+-        ":ml_dtypes_lib",
+-        ":numpy",
+-    ],
+-)
+diff --git a/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.cc b/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.cc
+index 0aee5eb89e7ea..b9a09c6b9d1f4 100644
+--- a/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.cc
++++ b/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.cc
+@@ -12,151 +12,37 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ ==============================================================================*/
+-
+-// The following headers need to be included in a specific order because of
+-// the numpy.h and Python.h headers.
+-// clang-format off
+-// NOLINTBEGIN
+-// Must be included first
+-#include "tsl/python/lib/core/numpy.h"
+-
+-#include <locale>
+-#include <memory>
+-// Place `<locale>` before <Python.h> to avoid a build failure in macOS.
+-#include <Python.h>
+-
+ #include "tsl/python/lib/core/ml_dtypes.h"
+-// NOLINTEND
+-// clang-format on
++
++#include "pybind11/numpy.h"  // from @pybind11
++#include "pybind11/pybind11.h"  // from @pybind11
+ 
+ namespace tsl {
+ namespace ml_dtypes {
+ 
+-namespace {
+-
+-struct PyDecrefDeleter {
+-  void operator()(PyObject* p) const { Py_DECREF(p); }
+-};
+-
+-using Safe_PyObjectPtr = std::unique_ptr<PyObject, PyDecrefDeleter>;
+-Safe_PyObjectPtr make_safe(PyObject* object) {
+-  return Safe_PyObjectPtr(object);
+-}
+-
+-struct FloatTypes {
+-  PyObject* bfloat16 = nullptr;
+-  PyObject* float8_e4m3fn = nullptr;
+-  PyObject* float8_e4m3b11fnuz = nullptr;
+-  PyObject* float8_e5m2 = nullptr;
+-
+-  int bfloat16_num = -1;
+-  int float8_e4m3fn_num = -1;
+-  int float8_e4m3b11fnuz_num = -1;
+-  int float8_e5m2_num = -1;
+-
+-  bool initialized = false;
+-};
+-
+-FloatTypes float_types_;  // Protected by the GIL.
+-
+-bool Initialize() {
+-  if (float_types_.initialized) {
+-    return true;
+-  }
+-
+-  auto init = []() {
+-    tsl::ImportNumpy();
+-    import_umath1(false);
+-
+-    Safe_PyObjectPtr numpy_str = make_safe(PyUnicode_FromString("numpy"));
+-    if (!numpy_str) {
+-      return false;
+-    }
+-    Safe_PyObjectPtr numpy = make_safe(PyImport_Import(numpy_str.get()));
+-    if (!numpy) {
+-      return false;
+-    }
+-
+-    Safe_PyObjectPtr ml_dtypes_str =
+-        make_safe(PyUnicode_FromString("ml_dtypes"));
+-    if (!ml_dtypes_str) {
+-      return false;
+-    }
+-    Safe_PyObjectPtr ml_dtypes =
+-        make_safe(PyImport_Import(ml_dtypes_str.get()));
+-    if (!ml_dtypes) {
+-      return false;
+-    }
+-    float_types_.bfloat16 = PyObject_GetAttrString(ml_dtypes.get(), "bfloat16");
+-    if (!float_types_.bfloat16) {
+-      return false;
+-    }
+-    float_types_.float8_e4m3fn =
+-        PyObject_GetAttrString(ml_dtypes.get(), "float8_e4m3fn");
+-    if (!float_types_.float8_e4m3fn) {
+-      return false;
+-    }
+-    float_types_.float8_e4m3b11fnuz =
+-        PyObject_GetAttrString(ml_dtypes.get(), "float8_e4m3b11");
+-    if (!float_types_.float8_e4m3b11fnuz) {
+-      return false;
+-    }
+-    float_types_.float8_e5m2 =
+-        PyObject_GetAttrString(ml_dtypes.get(), "float8_e5m2");
+-    if (!float_types_.float8_e5m2) {
+-      return false;
+-    }
+-
+-    float_types_.bfloat16_num = PyArray_TypeNumFromName("bfloat16");
+-    if (float_types_.bfloat16_num == NPY_NOTYPE) {
+-      return false;
+-    }
+-    float_types_.float8_e4m3fn_num = PyArray_TypeNumFromName("float8_e4m3fn");
+-    if (float_types_.float8_e4m3fn_num == NPY_NOTYPE) {
+-      return false;
+-    }
+-    float_types_.float8_e4m3b11fnuz_num =
+-        PyArray_TypeNumFromName("float8_e4m3b11fnuz");
+-    if (float_types_.float8_e4m3b11fnuz_num == NPY_NOTYPE) {
+-      return false;
+-    }
+-    float_types_.float8_e5m2_num = PyArray_TypeNumFromName("float8_e5m2");
+-    if (float_types_.float8_e5m2_num == NPY_NOTYPE) {
+-      return false;
+-    }
+-    float_types_.initialized = true;
+-    return true;
+-  };
+-  if (float_types_.initialized) {
+-    return true;
+-  }
+-  bool ok = init();
+-  if (!ok) {
+-    if (!PyErr_Occurred()) {
+-      PyErr_SetString(PyExc_RuntimeError, "cannot load ml_dtypes module.");
+-    }
+-    PyErr_Print();
+-  }
+-  return ok;
+-}
+-
+-}  // namespace
+-
+-bool RegisterTypes() { return Initialize(); }
+-
+-PyObject* GetBfloat16Dtype() { return float_types_.bfloat16; }
+-PyObject* GetFloat8E4m3b11fnuzDtype() {
+-  return float_types_.float8_e4m3b11fnuz;
+-}
+-PyObject* GetFloat8E4m3fnDtype() { return float_types_.float8_e4m3fn; }
+-PyObject* GetFloat8E5m2Dtype() { return float_types_.float8_e5m2; }
+-
+-int GetBfloat16TypeNum() { return float_types_.bfloat16_num; }
+-int GetFloat8E4m3b11fnuzTypeNum() {
+-  return float_types_.float8_e4m3b11fnuz_num;
++namespace py = pybind11;
++
++const NumpyDtypes& GetNumpyDtypes() {
++  static const NumpyDtypes* numpy_dtypes = []() {
++    py::module ml_dtypes = py::module::import("ml_dtypes");
++    NumpyDtypes* dtypes = new NumpyDtypes();
++    dtypes->bfloat16 = py::dtype::from_args(ml_dtypes.attr("bfloat16")).num();
++    dtypes->float8_e4m3fn =
++        py::dtype::from_args(ml_dtypes.attr("float8_e4m3fn")).num();
++    dtypes->float8_e5m2 =
++        py::dtype::from_args(ml_dtypes.attr("float8_e5m2")).num();
++    dtypes->float8_e4m3b11fnuz =
++        py::dtype::from_args(ml_dtypes.attr("float8_e4m3b11fnuz")).num();
++    dtypes->float8_e4m3fnuz =
++        py::dtype::from_args(ml_dtypes.attr("float8_e4m3fnuz")).num();
++    dtypes->float8_e5m2fnuz =
++        py::dtype::from_args(ml_dtypes.attr("float8_e5m2fnuz")).num();
++    dtypes->int4 = py::dtype::from_args(ml_dtypes.attr("int4")).num();
++    dtypes->uint4 = py::dtype::from_args(ml_dtypes.attr("uint4")).num();
++    return dtypes;
++  }();
++  return *numpy_dtypes;
+ }
+-int GetFloat8E4m3fnTypeNum() { return float_types_.float8_e4m3fn_num; }
+-int GetFloat8E5m2TypeNum() { return float_types_.float8_e5m2_num; }
+ 
+ }  // namespace ml_dtypes
+ }  // namespace tsl
+diff --git a/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.h b/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.h
+index 6e7efcaaf36cf..6164901d0a7c4 100644
+--- a/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.h
++++ b/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes.h
+@@ -16,28 +16,32 @@ limitations under the License.
+ #ifndef TENSORFLOW_TSL_PYTHON_LIB_CORE_ML_DTYPES_H_
+ #define TENSORFLOW_TSL_PYTHON_LIB_CORE_ML_DTYPES_H_
+ 
+-// Registers all custom types from the python ml_dtypes.py package.
++// Registers all custom types from the python ml_dtypes package.
+ //   https://github.com/jax-ml/ml_dtypes
+ 
+-#include <Python.h>
+-
+ namespace tsl {
+ namespace ml_dtypes {
+ 
+-// Register all ml dtypes.
+-bool RegisterTypes();
+-
+-// Return a pointer to the numpy dtype objects.
+-PyObject* GetBfloat16Dtype();
+-PyObject* GetFloat8E4m3b11fnuzDtype();
+-PyObject* GetFloat8E4m3fnDtype();
+-PyObject* GetFloat8E5m2Dtype();
+-
+-// Returns the type id number of the numpy type.
+-int GetBfloat16TypeNum();
+-int GetFloat8E4m3b11fnuzTypeNum();
+-int GetFloat8E4m3fnTypeNum();
+-int GetFloat8E5m2TypeNum();
++struct NumpyDtypes {
++  int bfloat16;
++  int float8_e4m3fn;
++  int float8_e4m3b11fnuz;
++  int float8_e4m3fnuz;
++  int float8_e5m2;
++  int float8_e5m2fnuz;
++  int int4;
++  int uint4;
++};
++
++const NumpyDtypes& GetNumpyDtypes();
++
++// Deprecated: no longer required, but is currently heavily used.
++inline bool RegisterTypes() {
++  GetNumpyDtypes();
++  return true;
++}
++
++inline int GetBfloat16TypeNum() { return GetNumpyDtypes().bfloat16; }
+ 
+ }  // namespace ml_dtypes
+ }  // namespace tsl
+diff --git a/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes_wrapper.cc b/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes_wrapper.cc
+deleted file mode 100644
+index 61c790daf88a8..0000000000000
+--- a/third_party/xla/third_party/tsl/tsl/python/lib/core/ml_dtypes_wrapper.cc
++++ /dev/null
+@@ -1,31 +0,0 @@
+-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-    http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+-==============================================================================*/
+-
+-#include "pybind11/pybind11.h"  // from @pybind11
+-#include "tsl/python/lib/core/ml_dtypes.h"
+-
+-PYBIND11_MODULE(pywrap_ml_dtypes, m) {
+-  tsl::ml_dtypes::RegisterTypes();
+-  m.def("bfloat16",
+-        [] { return pybind11::handle(tsl::ml_dtypes::GetBfloat16Dtype()); });
+-  m.def("float8_e4m3b11fnuz", [] {
+-    return pybind11::handle(tsl::ml_dtypes::GetFloat8E4m3b11fnuzDtype());
+-  });
+-  m.def("float8_e4m3fn", [] {
+-    return pybind11::handle(tsl::ml_dtypes::GetFloat8E4m3fnDtype());
+-  });
+-  m.def("float8_e5m2",
+-        [] { return pybind11::handle(tsl::ml_dtypes::GetFloat8E5m2Dtype()); });
+-}
+diff --git a/third_party/xla/xla/python_api/BUILD b/third_party/xla/xla/python_api/BUILD
+index f1ee1dbfd4b97..aaac07c9bcc78 100644
+--- a/third_party/xla/xla/python_api/BUILD
++++ b/third_party/xla/xla/python_api/BUILD
+@@ -20,7 +20,6 @@ py_strict_library(
+     deps = [
+         "//third_party/py/numpy",
+         "//xla:xla_data_proto_py",
+-        "@local_tsl//tsl/python/lib/core:pywrap_ml_dtypes",
+         "@ml_dtypes",
+     ],
+ )
+diff --git a/third_party/xla/xla/python_api/types_.py b/third_party/xla/xla/python_api/types_.py
+index 3f4b79db402df..bcf1b96ebf863 100644
+--- a/third_party/xla/xla/python_api/types_.py
++++ b/third_party/xla/xla/python_api/types_.py
+@@ -16,10 +16,10 @@
+ 
+ import collections
+ 
++import ml_dtypes as _md  # Avoids becoming a part of public Tensorflow API.
+ import numpy as _np  # Avoids becoming a part of public Tensorflow API.
+ 
+ from local_xla.xla import xla_data_pb2
+-from tsl.python.lib.core import pywrap_ml_dtypes
+ 
+ # Records correspondence between a XLA primitive type and Python/Numpy types.
+ #
+@@ -37,84 +37,84 @@
+ 
+ # Maps from XLA primitive types to TypeConversionRecord.
+ MAP_XLA_TYPE_TO_RECORD = {
+-    xla_data_pb2.BF16:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.BF16,
+-            numpy_dtype=pywrap_ml_dtypes.bfloat16(),
+-            literal_field_name='bf16s',
+-            literal_field_type=float),
+-    xla_data_pb2.F16:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.F16,
+-            numpy_dtype=_np.float16,
+-            literal_field_name='f16s',
+-            literal_field_type=float),
+-    xla_data_pb2.F32:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.F32,
+-            numpy_dtype=_np.float32,
+-            literal_field_name='f32s',
+-            literal_field_type=float),
+-    xla_data_pb2.F64:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.F64,
+-            numpy_dtype=_np.float64,
+-            literal_field_name='f64s',
+-            literal_field_type=float),
+-    xla_data_pb2.S8:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.S8,
+-            numpy_dtype=_np.int8,
+-            literal_field_name='s8s',
+-            literal_field_type=int),
+-    xla_data_pb2.S16:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.S16,
+-            numpy_dtype=_np.int16,
+-            literal_field_name='s16s',
+-            literal_field_type=int),
+-    xla_data_pb2.S32:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.S32,
+-            numpy_dtype=_np.int32,
+-            literal_field_name='s32s',
+-            literal_field_type=int),
+-    xla_data_pb2.S64:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.S64,
+-            numpy_dtype=_np.int64,
+-            literal_field_name='s64s',
+-            literal_field_type=int),
+-    xla_data_pb2.U8:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.U8,
+-            numpy_dtype=_np.uint8,
+-            literal_field_name='s8s',
+-            literal_field_type=int),
+-    xla_data_pb2.U16:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.U16,
+-            numpy_dtype=_np.uint16,
+-            literal_field_name='s16s',
+-            literal_field_type=int),
+-    xla_data_pb2.U32:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.U32,
+-            numpy_dtype=_np.uint32,
+-            literal_field_name='s32s',
+-            literal_field_type=int),
+-    xla_data_pb2.U64:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.U64,
+-            numpy_dtype=_np.uint64,
+-            literal_field_name='s64s',
+-            literal_field_type=int),
+-    xla_data_pb2.PRED:
+-        TypeConversionRecord(
+-            primitive_type=xla_data_pb2.PRED,
+-            numpy_dtype=_np.bool_,
+-            literal_field_name='preds',
+-            literal_field_type=bool)
++    xla_data_pb2.BF16: TypeConversionRecord(
++        primitive_type=xla_data_pb2.BF16,
++        numpy_dtype=_md.bfloat16,
++        literal_field_name='bf16s',
++        literal_field_type=float,
++    ),
++    xla_data_pb2.F16: TypeConversionRecord(
++        primitive_type=xla_data_pb2.F16,
++        numpy_dtype=_np.float16,
++        literal_field_name='f16s',
++        literal_field_type=float,
++    ),
++    xla_data_pb2.F32: TypeConversionRecord(
++        primitive_type=xla_data_pb2.F32,
++        numpy_dtype=_np.float32,
++        literal_field_name='f32s',
++        literal_field_type=float,
++    ),
++    xla_data_pb2.F64: TypeConversionRecord(
++        primitive_type=xla_data_pb2.F64,
++        numpy_dtype=_np.float64,
++        literal_field_name='f64s',
++        literal_field_type=float,
++    ),
++    xla_data_pb2.S8: TypeConversionRecord(
++        primitive_type=xla_data_pb2.S8,
++        numpy_dtype=_np.int8,
++        literal_field_name='s8s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.S16: TypeConversionRecord(
++        primitive_type=xla_data_pb2.S16,
++        numpy_dtype=_np.int16,
++        literal_field_name='s16s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.S32: TypeConversionRecord(
++        primitive_type=xla_data_pb2.S32,
++        numpy_dtype=_np.int32,
++        literal_field_name='s32s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.S64: TypeConversionRecord(
++        primitive_type=xla_data_pb2.S64,
++        numpy_dtype=_np.int64,
++        literal_field_name='s64s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.U8: TypeConversionRecord(
++        primitive_type=xla_data_pb2.U8,
++        numpy_dtype=_np.uint8,
++        literal_field_name='s8s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.U16: TypeConversionRecord(
++        primitive_type=xla_data_pb2.U16,
++        numpy_dtype=_np.uint16,
++        literal_field_name='s16s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.U32: TypeConversionRecord(
++        primitive_type=xla_data_pb2.U32,
++        numpy_dtype=_np.uint32,
++        literal_field_name='s32s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.U64: TypeConversionRecord(
++        primitive_type=xla_data_pb2.U64,
++        numpy_dtype=_np.uint64,
++        literal_field_name='s64s',
++        literal_field_type=int,
++    ),
++    xla_data_pb2.PRED: TypeConversionRecord(
++        primitive_type=xla_data_pb2.PRED,
++        numpy_dtype=_np.bool_,
++        literal_field_name='preds',
++        literal_field_type=bool,
++    ),
+ }
+ 
+ # Maps from Numpy dtypes to TypeConversionRecord.
