@@ -14,7 +14,7 @@ compatibility than the Ubuntu 20.04 ones.
 
 | TF | Python | GPU | CUDA | cuDNN | AVX2 | MKL/oneDNN | TensorRT | Links |
 |-|-|-|-|-|-|-|-|-|
-| 2.14.1 | 3.8-3.12 | 5.2-9.0 | 12.3 | 8.9 | :heavy_check_mark: | :heavy_check_mark: | 8.6 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_gpu_cuda12.3_cudnn8.9_avx2_mkl_trt8.6) |
+| 2.14.1, 2.15.0 | 3.8-3.12 | 5.2-9.0 | 12.3 | 8.9 | :heavy_check_mark: | :heavy_check_mark: | 8.6 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_gpu_cuda12.3_cudnn8.9_avx2_mkl_trt8.6) |
 | 2.13.0 | 3.8-3.11 | 5.2-9.0 | 12.2 | 8.9 | :heavy_check_mark: | :heavy_check_mark: | 8.6 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_gpu_cuda12.2_cudnn8.9_avx2_mkl_trt8.6) |
 | 2.12.0 | 3.8-3.11 | 5.2-9.0 | 12.1 | 8.9 | :heavy_check_mark: | :heavy_check_mark: | 8.6 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_gpu_cuda12.1_cudnn8.9_avx2_mkl_trt8.6) |
 | 2.7.4, 2.8.4, 2.9.3, 2.10.1, 2.11.0 | 3.7-3.11 | 5.2-9.0 | 11.8 | 8.8 | :heavy_check_mark: | :heavy_check_mark: | 8.5 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_2.7-2.11_gpu_py3x_cuda118_cudnn8_avx2_mkl_trt8) |
