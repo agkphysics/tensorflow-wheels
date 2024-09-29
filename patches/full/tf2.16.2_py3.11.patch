@@ -1,0 +1,2970 @@
+diff --git a/tensorflow/api_template.__init__.py b/tensorflow/api_template.__init__.py
+index a0f88926b5e..9c0bb098feb 100644
+--- a/tensorflow/api_template.__init__.py
++++ b/tensorflow/api_template.__init__.py
+@@ -27,7 +27,6 @@ this file with a file generated from [`api_template.__init__.py`](https://www.gi
+ """
+ # pylint: disable=g-bad-import-order,protected-access,g-import-not-at-top
+ 
+-import distutils as _distutils
+ import importlib
+ import inspect as _inspect
+ import os as _os
+@@ -95,10 +94,10 @@ _site_packages_dirs = []
+ if _site.ENABLE_USER_SITE and _site.USER_SITE is not None:
+   _site_packages_dirs += [_site.USER_SITE]
+ _site_packages_dirs += [p for p in _sys.path if "site-packages" in p]
+-if "getsitepackages" in dir(_site):
++try:
+   _site_packages_dirs += _site.getsitepackages()
+-
+-if "sysconfig" in dir(_distutils):
++except AttributeError:
++  import distutils as _distutils
+   _site_packages_dirs += [_distutils.sysconfig.get_python_lib()]
+ 
+ _site_packages_dirs = list(set(_site_packages_dirs))
+diff --git a/tensorflow/api_template_v1.__init__.py b/tensorflow/api_template_v1.__init__.py
+index 6a4ab4e655f..d6f8f2e0441 100644
+--- a/tensorflow/api_template_v1.__init__.py
++++ b/tensorflow/api_template_v1.__init__.py
+@@ -14,7 +14,6 @@
+ # ==============================================================================
+ """Bring in all of the public TensorFlow interface into this module."""
+ 
+-import distutils as _distutils
+ import importlib
+ import inspect as _inspect
+ import os as _os
+@@ -144,10 +143,10 @@ from tensorflow.python.lib.io import file_io as _fi
+ _site_packages_dirs = []
+ _site_packages_dirs += [] if _site.USER_SITE is None else [_site.USER_SITE]
+ _site_packages_dirs += [p for p in _sys.path if "site-packages" in p]
+-if "getsitepackages" in dir(_site):
++try:
+   _site_packages_dirs += _site.getsitepackages()
+-
+-if "sysconfig" in dir(_distutils):
++except AttributeError:
++  import distutils as _distutils
+   _site_packages_dirs += [_distutils.sysconfig.get_python_lib()]
+ 
+ _site_packages_dirs = list(set(_site_packages_dirs))
+diff --git a/tensorflow/compiler/tf2tensorrt/BUILD b/tensorflow/compiler/tf2tensorrt/BUILD
+index 91ef722b52d..a0d8e9736ad 100644
+--- a/tensorflow/compiler/tf2tensorrt/BUILD
++++ b/tensorflow/compiler/tf2tensorrt/BUILD
+@@ -531,6 +531,7 @@ tf_cuda_library(
+     hdrs = ["utils/trt_allocator.h"],
+     features = ["-layering_check"],
+     deps = [
++        ":common_utils",
+         "//tensorflow/core:framework_headers_lib",
+         "//tensorflow/core:framework_lite",
+         "//tensorflow/core:lib_proto_parsing",
+diff --git a/tensorflow/compiler/tf2tensorrt/common/utils.cc b/tensorflow/compiler/tf2tensorrt/common/utils.cc
+index 26ac37b237b..bca157b43bc 100644
+--- a/tensorflow/compiler/tf2tensorrt/common/utils.cc
++++ b/tensorflow/compiler/tf2tensorrt/common/utils.cc
+@@ -41,11 +41,19 @@ std::tuple<int, int, int> GetLinkedTensorRTVersion() {
+ 
+ std::tuple<int, int, int> GetLoadedTensorRTVersion() {
+ #if GOOGLE_CUDA && GOOGLE_TENSORRT
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   int ver = getInferLibVersion();
+   int major = ver / 1000;
+   ver = ver - major * 1000;
+   int minor = ver / 100;
+   int patch = ver - minor * 100;
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  // Note: The above logic using getInferLibVersion() produces the wrong version
++  // numbers since TensorRT 10.0, so these new functions must be used instead.
++  int major = getInferLibMajorVersion();
++  int minor = getInferLibMinorVersion();
++  int patch = getInferLibPatchVersion();
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   return std::tuple<int, int, int>{major, minor, patch};
+ #else
+   return std::tuple<int, int, int>{0, 0, 0};
+@@ -59,6 +67,7 @@ std::tuple<int, int, int> GetLoadedTensorRTVersion() {
+ namespace tensorflow {
+ namespace tensorrt {
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ Status GetTrtBindingIndex(const char* tensor_name, int profile_index,
+                           const nvinfer1::ICudaEngine* cuda_engine,
+                           int* binding_index) {
+@@ -93,6 +102,11 @@ Status GetTrtBindingIndex(int network_input_index, int profile_index,
+   return GetTrtBindingIndex(input_name.c_str(), profile_index, cuda_engine,
+                             binding_index);
+ }
++#else  // IS_TRT_VERSION_GE(10, 0, 0, 0)
++string GetTrtInputName(int network_input_index) {
++  return absl::StrCat(IONamePrefixes::kInputPHName, network_input_index);
++}
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+ 
+ namespace {
+ 
+@@ -234,6 +248,19 @@ std::ostream& operator<<(std::ostream& os, const nvinfer1::DataType& v) {
+       os << "kUINT8";
+       break;
+ #endif
++
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    case nvinfer1::DataType::kBF16:
++      os << "kBF16";
++      break;
++    case nvinfer1::DataType::kINT64:
++      os << "kINT64";
++      break;
++    case nvinfer1::DataType::kINT4:
++      os << "kINT4";
++      break;
++#endif
++
+   }
+   return os;
+ }
+diff --git a/tensorflow/compiler/tf2tensorrt/common/utils.h b/tensorflow/compiler/tf2tensorrt/common/utils.h
+index 0bc63ecd5c2..5c5f298051d 100644
+--- a/tensorflow/compiler/tf2tensorrt/common/utils.h
++++ b/tensorflow/compiler/tf2tensorrt/common/utils.h
+@@ -102,6 +102,7 @@ class IONamePrefixes {
+   static constexpr const char* const kOutputPHName = "TensorRTOutputPH_";
+ };
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ // Gets the binding index of a tensor in an engine.
+ //
+ // The binding index is looked up using the tensor's name and the profile index.
+@@ -116,6 +117,9 @@ Status GetTrtBindingIndex(const char* tensor_name, int profile_index,
+ Status GetTrtBindingIndex(int network_input_idx, int profile_index,
+                           const nvinfer1::ICudaEngine* cuda_engine,
+                           int* binding_index);
++#else  // IS_TRT_VERSION_GE(10, 0, 0, 0)
++string GetTrtInputName(int network_input_index);
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+ }  // namespace tensorrt
+ }  // namespace tensorflow
+ 
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/algorithm_selector.cc b/tensorflow/compiler/tf2tensorrt/convert/algorithm_selector.cc
+index 5421e7bb46b..10e99b68412 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/algorithm_selector.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/algorithm_selector.cc
+@@ -53,9 +53,16 @@ std::ostream& operator<<(std::ostream& os, const nvinfer1::IAlgorithm& alg) {
+ 
+ std::ostream& operator<<(std::ostream& os,
+                          const nvinfer1::IAlgorithmIOInfo& info) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   os << "IOTensor(format=" << info.getTensorFormat()
+      << ",dtype=" << info.getDataType() << ",strides=" << info.getStrides()
+      << ")";
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  os << "IOTensor(dtype=" << info.getDataType()
++     << ",strides=" << info.getStrides()
++     << ",vectorized_dim=" << info.getVectorizedDim()
++     << ",vectorized_components=" << info.getComponentsPerElement() << ")";
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   return os;
+ }
+ }  // namespace nvinfer1
+@@ -200,11 +207,13 @@ bool TftrtAlgorithmSelector::AlgorithmPolicy(
+     return false;
+   }
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   if (selector_.IsShuffleLayer(variant.getImplementation())) {
+     return selector_.AllowShuffleAlgorithm(
+         tactic_id, alg.getAlgorithmIOInfo(0).getDataType(),
+         alg.getAlgorithmIOInfo(0).getTensorFormat());
+   }
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   return true;
+ }
+ 
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/convert_graph.cc b/tensorflow/compiler/tf2tensorrt/convert/convert_graph.cc
+index e809152c1e7..9f26e73ecbd 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/convert_graph.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/convert_graph.cc
+@@ -713,13 +713,16 @@ Status CreateStaticEngine(const TRTOptimizationPass::ConversionParams& params,
+       (info.precision_mode == TrtPrecisionMode::INT8 && info.use_calibration);
+ 
+   // Create static engines with precision_mode fp32/fp16.
++  TrtUniquePtrType<nvinfer1::IRuntime> infer(
++      nvinfer1::createInferRuntime(*trt_logger));
+   TrtUniquePtrType<nvinfer1::ICudaEngine> engine;
+   TF_RETURN_IF_ERROR(ConvertGraphDefToEngine(
+       info.segment_graph_def, nullptr,
+       calibrate_int8 ? TrtPrecisionMode::FP32 : info.precision_mode,
+       max_batch_size, info.max_workspace_size_bytes, input_shapes, trt_logger,
+-      trt_allocator.get(), /*calibrator=*/nullptr, &engine,
+-      info.use_calibration, params.use_implicit_batch,
++      trt_allocator.get(), infer.get(),
++      /*calibrator=*/nullptr, &engine, info.use_calibration,
++      params.use_implicit_batch,
+       /*convert_successfully=*/nullptr, profile, info.engine_name,
+       /*use_explicit_precision=*/params.use_explicit_precision, cluster));
+   TrtUniquePtrType<nvinfer1::IHostMemory> engine_data(engine->serialize());
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.cc b/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.cc
+index 1c3a1903477..31d78e4db0e 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.cc
+@@ -108,7 +108,9 @@ namespace {
+ const char* LayerTypeToString(nvinfer1::LayerType layer_type) {
+   switch (layer_type) {
+     ADD_LAYER(CONVOLUTION)
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     ADD_LAYER(FULLY_CONNECTED)
++#endif
+     ADD_LAYER(ACTIVATION)
+     ADD_LAYER(POOLING)
+     ADD_LAYER(LRN)
+@@ -130,7 +132,9 @@ const char* LayerTypeToString(nvinfer1::LayerType layer_type) {
+     ADD_LAYER(MATRIX_MULTIPLY)
+     ADD_LAYER(RAGGED_SOFTMAX)
+     ADD_LAYER(CONSTANT)
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     ADD_LAYER(RNN_V2)
++#endif
+     ADD_LAYER(IDENTITY)
+     ADD_LAYER(PLUGIN_V2)
+     ADD_LAYER(SLICE)
+@@ -1082,9 +1086,13 @@ Status Converter::Init(nvinfer1::ILogger* trt_logger) {
+           : (1U << static_cast<int>(
+                  nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH));
+   if (use_explicit_precision_) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     flags |=
+         (1U << static_cast<int>(
+              nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_PRECISION));
++#else
++    return errors::Internal("Explicit precision is not supported since TensorRT 10");
++#endif
+   }
+   trt_network_.reset(trt_builder_->createNetworkV2(flags));
+   if (!trt_network_) {
+@@ -1252,7 +1260,8 @@ bool AbortCudaEngineBuild() {
+ Status Converter::BuildCudaEngine(
+     TrtUniquePtrType<nvinfer1::ICudaEngine>* engine, int max_batch_size,
+     size_t max_workspace_size_bytes, nvinfer1::IGpuAllocator* allocator,
+-    TRTInt8Calibrator* calibrator, TrtShapeOptimizationProfile* profiles) {
++    nvinfer1::IRuntime* runtime, TRTInt8Calibrator* calibrator,
++    TrtShapeOptimizationProfile* profiles) {
+   tensorflow::profiler::AnnotatedTraceMe activity(
+       [&]() {
+         return tensorflow::profiler::TraceMeOpOverride("TRTEngineOp",
+@@ -1266,13 +1275,20 @@ Status Converter::BuildCudaEngine(
+   }
+ 
+   VLOG(1) << "Configuring TensorRT builder";
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   trt_builder_->setMaxBatchSize(max_batch_size);
++#endif
+   trt_builder_->setGpuAllocator(allocator);
+ 
+   // Create a network configuration and use it to build a TRT engine.
+   TrtUniquePtrType<nvinfer1::IBuilderConfig> builder_config(
+       trt_builder_->createBuilderConfig());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   builder_config->setMaxWorkspaceSize(max_workspace_size_bytes);
++#else
++  builder_config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,
++                                     max_workspace_size_bytes);
++#endif
+ 
+   // Create the algorithm selector. For TensorRT 7.x, the algorithm selector
+   // cannot be used when building with INT8 calibration.
+@@ -1429,23 +1445,45 @@ Status Converter::BuildCudaEngine(
+       }
+     }
+   }
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   engine->reset(
+       trt_builder_->buildEngineWithConfig(*network(), *builder_config));
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  TrtUniquePtrType<nvinfer1::IHostMemory> serialized(
++      trt_builder_->buildSerializedNetwork(*network(), *builder_config));
++  if (!serialized) return errors::Internal("Failed to build TensorRT serialized network");
++  engine->reset(
++      runtime->deserializeCudaEngine(serialized->data(), serialized->size()));
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   if (engine->get() == nullptr) {
+     return errors::Internal("Failed to build TensorRT engine");
+   }
+   if (VLOG_IS_ON(2)) {
+     VLOG(2) << "TRT engine created";
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     int nbBindings = (*engine)->getNbBindings();
++#else
++    int nbBindings = (*engine)->getNbIOTensors();
++#endif
+     VLOG(2) << "Number of engine bindings: " << nbBindings;
+     for (int i = 0; i < nbBindings; i++) {
+       auto get_location_string = [&engine](int i) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+         if ((*engine)->getLocation(i) == nvinfer1::TensorLocation::kDEVICE)
++#else
++        if ((*engine)->getTensorLocation((*engine)->getIOTensorName(i)) ==
++            nvinfer1::TensorLocation::kDEVICE)
++#endif
+           return " on device";
+         else
+           return " on host";
+       };
+-      VLOG(2) << "Binding " << i << " name: " << (*engine)->getBindingName(i)
++      VLOG(2) << "Binding " << i << " name: "
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++              << (*engine)->getBindingName(i)
++#else
++              << (*engine)->getIOTensorName(i)
++#endif
+               << get_location_string(i);
+     }
+   }
+@@ -2060,11 +2098,19 @@ Status ConvertConv2DHelper(const OpConverterParams* params, int group,
+   nvinfer1::ILayer* conv_layer = nullptr;
+   if (is_conv2d_backprop_input) {
+     nvinfer1::IDeconvolutionLayer* layer =
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+         params->converter->network()->addDeconvolution(
++#else
++        params->converter->network()->addDeconvolutionNd(
++#endif
+             *tensor->trt_tensor(), noutput, kernel_size,
+             weights->GetTrtWeights(), biases->GetTrtWeights());
+     TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_def.name());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     layer->setStride(stride);
++#else
++    layer->setStrideNd(stride);
++#endif
+     // VALID padding is the default TRT behavior.
+     if (padding_type == "SAME") {
+       // SAME_UPPER means that post padding is preferred.
+@@ -2076,18 +2122,30 @@ Status ConvertConv2DHelper(const OpConverterParams* params, int group,
+     const nvinfer1::Weights empty_weights{nvinfer1::DataType::kFLOAT, nullptr,
+                                           0};
+     nvinfer1::IConvolutionLayer* layer =
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+         params->converter->network()->addConvolution(
++#else
++        params->converter->network()->addConvolutionNd(
++#endif
+             *tensor->trt_tensor(), noutput, kernel_size,
+             params->use_explicit_precision ? empty_weights
+                                            : weights->GetTrtWeights(),
+             empty_weights);
+     TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_def.name());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     layer->setStride(stride);
++#else
++    layer->setStrideNd(stride);
++#endif
+     if (padding_type == "SAME") {
+       layer->setPaddingMode(nvinfer1::PaddingMode::kSAME_UPPER);
+     }
+     layer->setNbGroups(num_groups);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     layer->setDilation(dilation);
++#else
++    layer->setDilationNd(dilation);
++#endif
+     conv_layer = layer;
+   }
+ 
+@@ -2136,8 +2194,12 @@ Status ConvertConv2DHelper(const OpConverterParams* params, int group,
+       nvinfer1::DimsHW pre_padding(0, 0);
+       nvinfer1::DimsHW post_padding(height_diff, width_diff);
+       nvinfer1::IPaddingLayer* padding_layer =
+-          params->converter->network()->addPadding(*output_tensor->trt_tensor(),
+-                                                   pre_padding, post_padding);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++          params->converter->network()->addPadding(
++#else
++          params->converter->network()->addPaddingNd(
++#endif
++              *output_tensor->trt_tensor(), pre_padding, post_padding);
+       output_tensor = padding_layer->getOutput(0);
+       params->converter->SetLayerName(padding_layer, node_def, "pad");
+     }
+@@ -2212,6 +2274,11 @@ Status ConvertTranspose(const OpConverterParams* params) {
+ 
+ Status ConvertShape(const OpConverterParams* params) {
+   const auto& inputs = params->inputs;
++  const auto& node_def = params->node_def;
++  DataType out_type;
++  TF_RETURN_IF_ERROR(GetNodeAttr(AttrSlice(node_def), "out_type", &out_type));
++  nvinfer1::DataType trt_out_type;
++  TF_RETURN_IF_ERROR(TfTypeToTrtType(out_type, &trt_out_type));
+   TF_RETURN_IF_ERROR(
+       CheckInputsWeights(*params, {{"input", TrtInputArg::kBoth}}));
+   if (params->use_implicit_batch) {
+@@ -2224,20 +2291,27 @@ Status ConvertShape(const OpConverterParams* params) {
+   StatusOr<TRTNetworkBuilder> builder = TRTNetworkBuilder::Create(
+       params->converter->network(), params->weight_store);
+   TRT_ENSURE_OK(builder);
++  nvinfer1::ITensor* out_tensor;
+   if (input_dims.IsStatic()) {
+     // Create a const node with the value of the shape.
+     StatusOr<nvinfer1::IConstantLayer*> const_layer =
+         builder->ConstantShape(input_dims);
+     TRT_ENSURE_PTR_OK(const_layer);
+-    params->outputs->push_back(
+-        TRT_TensorOrWeights((*const_layer)->getOutput(0)));
+-    return OkStatus();
+-  }
+-  StatusOr<nvinfer1::IShapeLayer*> shape_layer =
+-      builder->Shape(inputs.at(0).tensor()->trt_tensor());
+-  TRT_ENSURE_PTR_OK(shape_layer);
+-  params->converter->SetLayerName(*shape_layer, params->node_def, "shape");
+-  params->outputs->push_back(TRT_TensorOrWeights((*shape_layer)->getOutput(0)));
++    out_tensor = (*const_layer)->getOutput(0);
++  } else {
++    StatusOr<nvinfer1::IShapeLayer*> shape_layer =
++        builder->Shape(inputs.at(0).tensor()->trt_tensor());
++    TRT_ENSURE_PTR_OK(shape_layer);
++    params->converter->SetLayerName(*shape_layer, params->node_def, "shape");
++    out_tensor = (*shape_layer)->getOutput(0);
++  }
++  if (out_tensor->getType() != trt_out_type) {
++    nvinfer1::ICastLayer* cast_layer =
++        params->converter->network()->addCast(*out_tensor, trt_out_type);
++    TRT_ENSURE(cast_layer);
++    out_tensor = cast_layer->getOutput(0);
++  }
++  params->outputs->push_back(TRT_TensorOrWeights(out_tensor));
+   return OkStatus();
+ }
+ 
+@@ -2430,6 +2504,14 @@ Status Converter::DynamicReshape(ITensorProxyPtr input,
+   }
+   ITensorProxyPtr shape =
+       network()->addShape(*input->trt_tensor())->getOutput(0);
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++  // TODO(benbarsdell): Casting to int32 makes this match the pre-TRT10
++  // behavior, but it would be better to instead cast all the other int32
++  // tensors below to int64.
++  shape = network()
++              ->addCast(*shape->trt_tensor(), nvinfer1::DataType::kINT32)
++              ->getOutput(0);
++#endif
+   // Build new shape = shape[:trt_axis] + [1] + shape[trt_axis:]
+   std::vector<ITensorProxyPtr> concat_inputs;
+   int max_num_slices = std::max(slices.size(), size_for_added_dims.size());
+@@ -3266,7 +3348,11 @@ Status ConvertFusedConv2DBiasActivation(const OpConverterParams* params) {
+   nvinfer1::IConvolutionLayer* conv_layer = nullptr;
+   if (filter_format == "OIHW") {
+     // Weights are already in the right order.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     conv_layer = params->converter->network()->addConvolution(
++#else
++    conv_layer = params->converter->network()->addConvolutionNd(
++#endif
+         *tensor->trt_tensor(), weights.Shape().dim(0), kernel_size,
+         weights.GetTrtWeights(), biases.GetTrtWeights());
+   } else {
+@@ -3276,18 +3362,30 @@ Status ConvertFusedConv2DBiasActivation(const OpConverterParams* params) {
+         params->weight_store->GetTempWeights(weights);
+     TRT_ENSURE_OK(weights_kcrs);
+     ReorderRSCKToKCRS(weights, &*weights_kcrs, 1);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     conv_layer = params->converter->network()->addConvolution(
++#else
++    conv_layer = params->converter->network()->addConvolutionNd(
++#endif
+         *tensor->trt_tensor(), weights.Shape().dim(3), kernel_size,
+         weights_kcrs->GetTrtWeights(), biases.GetTrtWeights());
+   }
+   TFTRT_RETURN_ERROR_IF_NULLPTR(conv_layer, node_def.name());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   conv_layer->setStride(stride);
++#else
++  conv_layer->setStrideNd(stride);
++#endif
+   if (padding_type == "SAME") {
+     conv_layer->setPaddingMode(nvinfer1::PaddingMode::kSAME_UPPER);
+   }
+   params->converter->SetLayerName(conv_layer, node_def, "conv");
+   conv_layer->setNbGroups(1);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   conv_layer->setDilation(dilation);
++#else
++  conv_layer->setDilationNd(dilation);
++#endif
+   ITensorProxyPtr output_tensor = conv_layer->getOutput(0);
+ 
+   // Add activation if there is one.
+@@ -3359,11 +3457,19 @@ Status ConvertPool(const OpConverterParams* params) {
+         tensor, {0, 3, 1, 2}, &tensor, node_def, "to_NCHW"));
+   }
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   nvinfer1::IPoolingLayer* layer = params->converter->network()->addPooling(
++#else
++  nvinfer1::IPoolingLayer* layer = params->converter->network()->addPoolingNd(
++#endif
+       *tensor->trt_tensor(), type, ksize);
+   TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_def.name());
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   layer->setStride(stride);
++#else
++  layer->setStrideNd(stride);
++#endif
+   // VALID padding is the default TRT behavior.
+   if (padding_type == "SAME") {
+     // SAME_UPPER means that post padding is preferred.
+@@ -4000,7 +4106,11 @@ Status ConvertPad(const OpConverterParams* params) {
+         tensor, transpose_idx, &tensor, node_def, "to_pad"));
+   }
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   nvinfer1::IPaddingLayer* layer = params->converter->network()->addPadding(
++#else
++  nvinfer1::IPaddingLayer* layer = params->converter->network()->addPaddingNd(
++#endif
+       *tensor->trt_tensor(), pre_padding, post_padding);
+   TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_def.name());
+   params->converter->SetLayerName(layer, node_def);
+@@ -4684,10 +4794,27 @@ StatusOr<ITensorProxyPtr> ConvertFullyConnectedImpl(
+           << ", n_output=" << noutput
+           << " weights shape: " << weights.Shape().DebugString()
+           << " to convert " << node_def.op();
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   nvinfer1::IFullyConnectedLayer* layer =
+       params->converter->network()->addFullyConnected(
+           *tensor_a->trt_tensor(), noutput, weights.GetTrtWeights(),
+           biases.GetTrtWeights());
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  nvinfer1::IConstantLayer* weights_layer =
++      params->converter->network()->addConstant(weights.Shape().AsTrtDims(),
++                                                weights.GetTrtWeights());
++  nvinfer1::IConstantLayer* bias_layer =
++      params->converter->network()->addConstant(biases.Shape().AsTrtDims(),
++                                                biases.GetTrtWeights());
++  nvinfer1::IMatrixMultiplyLayer* matmul_layer =
++      params->converter->network()->addMatrixMultiply(
++          *tensor_a->trt_tensor(), nvinfer1::MatrixOperation::kNONE,
++          *weights_layer->getOutput(0), nvinfer1::MatrixOperation::kNONE);
++  nvinfer1::IElementWiseLayer* layer =
++      params->converter->network()->addElementWise(
++          *matmul_layer->getOutput(0), *bias_layer->getOutput(0),
++          nvinfer1::ElementWiseOperation::kSUM);
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ 
+   TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_def.name());
+   params->converter->SetLayerName(layer, node_def);
+@@ -4703,7 +4830,13 @@ StatusOr<ITensorProxyPtr> ConvertFullyConnectedImpl(
+   TF_RETURN_IF_ERROR(PrepareTensorForShape(
+       params->converter, TRT_TensorOrWeights(output_tensor), output_dim,
+       /*validation_only=*/false, &output_tensor, node_def,
+-      /*op_instance=*/1, /*origin_node_name=*/"FULLY_CONNECTED"));
++      /*op_instance=*/1,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++      /*origin_node_name=*/"FULLY_CONNECTED")
++#else
++      /*origin_node_name=*/"MATRIX_MULTIPLY")
++#endif
++  );
+   return output_tensor;
+ }
+ 
+@@ -5007,6 +5140,14 @@ CalcDepthSpaceDynamicShape(const OpConverterParams* params, int block_size,
+   ITensorProxyPtr shape = params->converter->network()
+                               ->addShape(*inputs.at(0).tensor()->trt_tensor())
+                               ->getOutput(0);
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++  // TODO(benbarsdell): Casting to int32 makes this match the pre-TRT10
++  // behavior, but it would be better to instead cast all the other int32
++  // tensors below to int64.
++  shape = params->converter->network()
++              ->addCast(*shape->trt_tensor(), nvinfer1::DataType::kINT32)
++              ->getOutput(0);
++#endif
+   ITensorProxyPtr batch_size =
+       params->converter->network()
+           ->addSlice(*shape->trt_tensor(), {1, {0}}, {1, {1}}, {1, {1}})
+@@ -5597,7 +5738,11 @@ Status ConvertResize(const OpConverterParams* params) {
+       AllowDataTypes(*params, {DataType::DT_FLOAT, DataType::DT_HALF}));
+ 
+   // Verify resize mode. Initialize resize mode if supported.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   nvinfer1::ResizeMode resize_mode;
++#else
++  nvinfer1::InterpolationMode resize_mode;
++#endif
+   if (node_def.op() == "ResizeBilinear") {
+ #if IS_TRT_VERSION_GE(7, 1, 0, 0)
+     if (!align_corners) {
+@@ -5605,9 +5750,17 @@ Status ConvertResize(const OpConverterParams* params) {
+           "Cannot Convert Bilinear Resize when align_corners=False");
+     }
+ #endif
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     resize_mode = nvinfer1::ResizeMode::kLINEAR;
++#else
++    resize_mode = nvinfer1::InterpolationMode::kLINEAR;
++#endif
+   } else if (node_def.op() == "ResizeNearestNeighbor") {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     resize_mode = nvinfer1::ResizeMode::kNEAREST;
++#else
++    resize_mode = nvinfer1::InterpolationMode::kNEAREST;
++#endif
+   } else {
+     return errors::Unimplemented(node_def.op(), " is not yet implemented");
+   }
+@@ -5643,6 +5796,14 @@ Status ConvertResize(const OpConverterParams* params) {
+     ITensorProxyPtr shape = params->converter->network()
+                                 ->addShape(*inputs_tensor->trt_tensor())
+                                 ->getOutput(0);
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    // TODO(benbarsdell): Casting to int32 makes this match the pre-TRT10
++    // behavior, but it would be better to instead cast all the other int32
++    // tensors below to int64.
++    shape = params->converter->network()
++                ->addCast(*shape->trt_tensor(), nvinfer1::DataType::kINT32)
++                ->getOutput(0);
++#endif
+     ITensorProxyPtr batch_size =
+         params->converter->network()
+             ->addSlice(*shape->trt_tensor(), {1, {0}}, {1, {1}}, {1, {1}})
+@@ -5686,7 +5847,14 @@ Status ConvertResize(const OpConverterParams* params) {
+ 
+   // Set layer parameters.
+   layer->setResizeMode(resize_mode);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   layer->setAlignCorners(align_corners);
++#else
++  if (align_corners) {
++    layer->setCoordinateTransformation(
++        nvinfer1::ResizeCoordinateTransformation::kALIGN_CORNERS);
++  }
++#endif
+ 
+   // Set output shape.
+   if (static_output_shape) {
+@@ -5833,7 +6001,7 @@ Status ConvertGraphDefToEngine(
+     int max_batch_size, size_t max_workspace_size_bytes,
+     const std::vector<PartialTensorShape>& input_shapes,
+     nvinfer1::ILogger* trt_logger, nvinfer1::IGpuAllocator* allocator,
+-    TRTInt8Calibrator* calibrator,
++    nvinfer1::IRuntime* runtime, TRTInt8Calibrator* calibrator,
+     TrtUniquePtrType<nvinfer1::ICudaEngine>* engine, bool use_calibration,
+     const bool use_implicit_batch, bool* convert_successfully,
+     TrtShapeOptimizationProfile* profiles, absl::string_view engine_name,
+@@ -6026,8 +6194,8 @@ Status ConvertGraphDefToEngine(
+ 
+   // Build the engine.
+   TF_RETURN_IF_ERROR(converter->BuildCudaEngine(
+-      engine, max_batch_size, max_workspace_size_bytes, allocator, calibrator,
+-      profiles));
++      engine, max_batch_size, max_workspace_size_bytes, allocator, runtime,
++      calibrator, profiles));
+ 
+   VLOG(1) << "Finished conversion";
+   return OkStatus();
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.h b/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.h
+index e9afd320be9..241de56c3ea 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.h
++++ b/tensorflow/compiler/tf2tensorrt/convert/convert_nodes.h
+@@ -156,7 +156,7 @@ Status ConvertGraphDefToEngine(
+     int max_batch_size, size_t max_workspace_size_bytes,
+     const std::vector<PartialTensorShape>& input_shapes,
+     nvinfer1::ILogger* logger, nvinfer1::IGpuAllocator* allocator,
+-    TRTInt8Calibrator* calibrator,
++    nvinfer1::IRuntime* runtime, TRTInt8Calibrator* calibrator,
+     TrtUniquePtrType<nvinfer1::ICudaEngine>* engine, bool use_calibration,
+     const bool use_implicit_batch, bool* convert_successfully,
+     TrtShapeOptimizationProfile* profiles, absl::string_view engine_name,
+@@ -280,6 +280,7 @@ class Converter {
+   Status BuildCudaEngine(TrtUniquePtrType<nvinfer1::ICudaEngine>* engine,
+                          int max_batch_size, size_t max_workspace_size_bytes,
+                          nvinfer1::IGpuAllocator* allocator,
++                         nvinfer1::IRuntime* runtime,
+                          TRTInt8Calibrator* calibrator,
+                          TrtShapeOptimizationProfile* profiles);
+ 
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/convert_nodes_test.cc b/tensorflow/compiler/tf2tensorrt/convert/convert_nodes_test.cc
+index 332be3f50bf..90e8f207dcc 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/convert_nodes_test.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/convert_nodes_test.cc
+@@ -135,9 +135,16 @@ using ::testing::PrintToString;
+ using ::tensorflow::testing::IsOk;
+ using ::tensorflow::testing::StatusIs;
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ constexpr std::array<TrtTestMode, 3> ValidTrtModes = {
+-    TrtTestMode::kImplicitBatch, TrtTestMode::kExplicitBatch,
++    TrtTestMode::kImplicitBatch,
++    TrtTestMode::kExplicitBatch,
+     TrtTestMode::kDynamicShape};
++#else
++constexpr std::array<TrtTestMode, 2> ValidTrtModes = {
++    TrtTestMode::kExplicitBatch,
++    TrtTestMode::kDynamicShape};
++#endif
+ 
+ bool TrtShapedWeightsEquals(const TRT_ShapedWeights& lhs,
+                             const TRT_ShapedWeights& rhs) {
+@@ -299,7 +306,11 @@ class ValidatorTest : public ::testing::Test {
+ 
+     TrtNodeValidator validator(graph_properties, TrtPrecisionMode::FP32,
+                                /*use_calibration=*/false,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+                                /*use_implicit_batch=*/true,
++#else
++                               /*use_implicit_batch=*/false,
++#endif
+                                /*use_explicit_precision=*/false);
+     return validator.ConvertToTensorOrWeights(node->def(), output_port,
+                                               tensor_or_weights);
+@@ -336,8 +347,15 @@ TEST_F(ValidatorTest, ConvertToTensorOrWeights) {
+         convert_to_tensor_or_weights(
+             std::vector<int64_t>(nvinfer1::Dims::MAX_DIMS + 2, 1), &output),
+         StatusIs(absl::StatusCode::kOutOfRange,
+-                 HasSubstr("Input tensor rank is greater than 9")));
++                 HasSubstr("Input tensor rank is greater than "
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                           "9"
++#else
++                           "8"
++#endif
++                           )));
+   }
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   // Convert non-Const with #dims < 1.
+   {
+     TRT_TensorOrWeights output;
+@@ -360,6 +378,7 @@ TEST_F(ValidatorTest, ConvertToTensorOrWeights) {
+     EXPECT_NE(nullptr, output.tensor()->simple_tensor());
+     EXPECT_THAT(output.GetTrtDims(), DimsAreArray({non_batch_dim}));
+   }
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ }
+ 
+ TEST_F(ValidatorTest, IsTensorRTCandidate_Basics) {
+@@ -375,7 +394,11 @@ TEST_F(ValidatorTest, IsTensorRTCandidate_Basics) {
+   TF_EXPECT_OK(graph_properties.InferStatically(true));
+   TrtNodeValidator validator(graph_properties, TrtPrecisionMode::FP32,
+                              /*use_calibration=*/false,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+                              /*use_implicit_batch=*/true,
++#else
++                             /*use_implicit_batch=*/false,
++#endif
+                              /*use_explicit_precision=*/false);
+ 
+   // Override the Add converter.
+@@ -462,15 +485,21 @@ TEST(TrtNodeValidator, IsTensorRTCandidate) {
+        {TrtPrecisionMode::FP32, TrtPrecisionMode::INT8}) {
+     TrtNodeValidator validator(graph_properties, precision_mode,
+                                /*use_calibration=*/false,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+                                /*use_implicit_batch=*/true,
++#else
++                               /*use_implicit_batch=*/false,
++#endif
+                                /*use_explicit_precision=*/false);
+     TF_EXPECT_OK(validator.IsTensorRTCandidate(matmul.operation.node()));
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     EXPECT_THAT(
+         validator.IsTensorRTCandidate(incompatible_matmul.operation.node()),
+         StatusIs(absl::StatusCode::kInvalidArgument,
+                  HasSubstr("MatMul with 2D tensors requires explicit batch "
+                            "mode, or that tensor A "
+                            "is not transposed and B is a constant tensor.")));
++#endif
+     EXPECT_THAT(validator.IsTensorRTCandidate(unsupported_op.operation.node()),
+                 StatusIs(absl::StatusCode::kUnimplemented,
+                          HasSubstr("Op type Erfc is not supported")));
+@@ -503,7 +532,11 @@ class ConverterTest : public ::testing::Test {
+     converter_ =
+         std::move(Converter::Create(TrtPrecisionMode::FP32,
+                                     /*use_calibration=*/false, &logger_,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+                                     /*use_implicit_batch=*/true,
++#else
++                                    /*use_implicit_batch=*/false,
++#endif
+                                     /*engine_name=*/"TRTEngineOp_000_000",
+                                     /*use_explicit_precision=*/false)
+                       .value());
+@@ -692,15 +725,23 @@ TEST_F(ConverterTest, TransposeTensor) {
+                                  "with that of the input")));
+ 
+   // Transpose at batch dimension.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   EXPECT_THAT(
+       converter_->TransposeTensor(input_tensor, {1, 0, 2, 3}, &output_tensor,
+                                   dummy_node_def, "sub2"),
+       StatusIs(absl::StatusCode::kUnimplemented,
+                HasSubstr("Transpose at batch dimension is not supported.")));
++#endif
+ 
+   // OK.
+   TF_EXPECT_OK(converter_->TransposeTensor(
+-      input_tensor, {0, 3, 1, 2}, &output_tensor, dummy_node_def, "sub3"));
++      input_tensor,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++      {0, 3, 1, 2},
++#else
++      {2, 0, 1},
++#endif
++      &output_tensor, dummy_node_def, "sub3"));
+   EXPECT_THAT(output_tensor->getDimensions(), DimsAreArray({5, 2, 3}));
+   EXPECT_THAT(
+       converter_->network(),
+@@ -815,14 +856,18 @@ TEST_F(ConverterTest, AddAndGetTensorOrWeights) {
+   // Add a tensor.
+   ITensorProxyPtr simple_tensor;
+   TRT_TensorOrWeights tensor(simple_tensor);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   EXPECT_EQ(-1, tensor.batch_size());
++#endif
+   TF_EXPECT_OK(MaybeUpdateBatchSize(123));
+   TF_EXPECT_OK(AddTensorOrWeights("my_tensor", tensor));
+ 
+   // Get the added tensor.
+   TRT_TensorOrWeights added_tensor;
+   TF_EXPECT_OK(GetTensorOrWeights("my_tensor", &added_tensor));
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   EXPECT_EQ(123, added_tensor.batch_size());
++#endif
+ 
+   // Add the same tensor again.
+   EXPECT_THAT(AddTensorOrWeights("my_tensor", tensor),
+@@ -875,7 +920,11 @@ TEST_F(ConverterTest, MaybeApplyQuantizationRanges) {
+   Logger& logger = *Logger::GetLogger();
+   auto int8_converter = Converter::Create(TrtPrecisionMode::INT8,
+                                           /*use_calibration=*/true, &logger,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+                                           /*use_implicit_batch=*/true,
++#else
++                                          /*use_implicit_batch=*/false,
++#endif
+                                           /*engine_name=*/"")
+                             .value();
+   int8_converter->ProvideQuantizationRange(&input, -5.0f, 5.0f);
+@@ -1016,6 +1065,10 @@ TEST_F(ConverterTest, CreateConstantLayer) {
+ 
+ class ConvertGraphDefToEngineTest : public ::testing::Test {
+  public:
++  ConvertGraphDefToEngineTest() {
++    runtime_.reset(nvinfer1::createInferRuntime(logger_));
++  }
++
+   Status RunConvertGraphDefToEngine(Scope* s) {
+     GraphDef gdef;
+     TF_EXPECT_OK(s->ToGraphDef(&gdef));
+@@ -1040,13 +1093,20 @@ class ConvertGraphDefToEngineTest : public ::testing::Test {
+     return ConvertGraphDefToEngine(
+         gdef, /*ctx=*/nullptr, TrtPrecisionMode::FP32, /*max_batch_size=*/1,
+         /*max_workspace_size_bytes=*/64 << 20, input_shapes, &logger_,
+-        /*allocator=*/nullptr, /*calibrator=*/nullptr, &engine_,
+-        /*use_calibration=*/false, /*use_implicit_batch=*/true,
++        /*allocator=*/nullptr, runtime_.get(),
++        /*calibrator=*/nullptr, &engine_,
++        /*use_calibration=*/false,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++        /*use_implicit_batch=*/true,
++#else
++        /*use_implicit_batch=*/false,
++#endif
+         /*convert_successfully=*/nullptr, /*profiles=*/nullptr,
+         "TRTEngineOp_000_000", /*use_explicit_precision=*/false);
+   }
+ 
+  protected:
++  TrtUniquePtrType<nvinfer1::IRuntime> runtime_;
+   TrtUniquePtrType<nvinfer1::ICudaEngine> engine_;
+ 
+  private:
+@@ -1127,11 +1187,17 @@ class OpConverterTest : public ::testing::Test {
+   }
+ 
+   void Reset(TrtPrecisionMode precision_mode_to_test = TrtPrecisionMode::FP32,
+-             TrtTestMode trt_mode = TrtTestMode::kImplicitBatch,
++             TrtTestMode trt_mode =
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                 TrtTestMode::kImplicitBatch,
++#else
++                 TrtTestMode::kDynamicShape,
++#endif
+              OpKernelContext* ctx = nullptr) {
+     // Destroy existing TRT objects in a proper order.
+     converter_.reset(nullptr);
+     engine_.reset(nullptr);
++    runtime_.reset(nullptr);
+ 
+     // Re-create them in proper order.
+     converter_ =
+@@ -1145,6 +1211,8 @@ class OpConverterTest : public ::testing::Test {
+ 
+     // Reset other related artifacts.
+     scope_ = Scope::NewRootScope();
++
++    runtime_.reset(nvinfer1::createInferRuntime(logger_));
+   }
+ 
+   // Constructs a flat tensor with 'vals' in Unified Memory.
+@@ -1230,18 +1298,32 @@ class OpConverterTest : public ::testing::Test {
+ 
+   void CheckDataTypeMatches(const DataVec& datas) {
+     if (VLOG_IS_ON(2)) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       int nbBindings = engine_->getNbBindings();
++#else
++      int nbBindings = engine_->getNbIOTensors();
++#endif
+       VLOG(2) << "Number of engine bindings: " << nbBindings;
+       for (int i = 0; i < nbBindings; i++) {
+-        VLOG(2) << "Binding " << i << " name: " << engine_->getBindingName(i);
++        VLOG(2) << "Binding " << i << " name: " <<
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++            engine_->getBindingName(i);
++#else
++            engine_->getIOTensorName(i);
++#endif
+       }
+     }
+     for (const auto& data : datas) {
+       VLOG(2) << "Checking if data type matches for tensor " << data.name;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       const int input_index = engine_->getBindingIndex(data.name.c_str());
+       ASSERT_NE(-1, input_index);
+       const nvinfer1::DataType trt_dtype =
+           engine_->getBindingDataType(input_index);
++#else
++      const nvinfer1::DataType trt_dtype =
++          engine_->getTensorDataType(data.name.c_str());
++#endif
+       DataType tf_type;
+       TF_ASSERT_OK(TrtTypeToTfType(trt_dtype, &tf_type));
+       ASSERT_EQ(data.tensor.dtype(), tf_type)
+@@ -1287,7 +1369,7 @@ class OpConverterTest : public ::testing::Test {
+         converter_->BuildCudaEngine(&engine_,
+                                     /*max_batch_size=*/batch_size,
+                                     /*max_workspace_size_bytes=*/1 << 26,
+-                                    /*allocator=*/nullptr,
++                                    /*allocator=*/nullptr, runtime_.get(),
+                                     /*calibrator=*/nullptr,
+                                     /*profiles=*/&profiles));
+     CHECK_NOTNULL(engine_.get());
+@@ -1297,7 +1379,12 @@ class OpConverterTest : public ::testing::Test {
+     const int num_bindings = input_data.size() + output_data->size();
+     std::vector<void*> buffers(num_bindings);
+ 
+-    if (engine_->getNbBindings() != num_bindings) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++    const int actual_num_bindings = engine_->getNbBindings();
++#else
++    const int actual_num_bindings = engine_->getNbIOTensors();
++#endif
++    if (actual_num_bindings != num_bindings) {
+       return errors::Internal("Number of bindings do not match");
+     }
+     // Since we have only 1 optimization profile (which is enabled by default)
+@@ -1308,16 +1395,25 @@ class OpConverterTest : public ::testing::Test {
+ 
+     // Prepare input bindings.
+     TF_RETURN_IF_ERROR(
+-        SetTrtEngineInputs(engine_.get(), execution_context.get(), 0, buffers,
++        SetTrtEngineInputs(engine_.get(), execution_context.get(), 0,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                           buffers,
++#endif
+                            converter_->use_implicit_batch(), batch_size,
+                            profiles, nullptr, &input_data));
+     // Prepare output bindings.
+     TF_RETURN_IF_ERROR(SetTrtEngineOutputs(
+-        engine_.get(), execution_context.get(), 0, buffers,
++        engine_.get(), execution_context.get(), 0,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++        buffers,
++#endif
+         converter_->use_implicit_batch(), batch_size, nullptr, output_data));
+     // Execute the TRT engine.
+-    TF_RETURN_IF_ERROR(TrtEnqueue(execution_context.get(), buffers, stream_,
+-                                  converter_->use_implicit_batch(),
++    TF_RETURN_IF_ERROR(TrtEnqueue(execution_context.get(),
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                  buffers,
++#endif
++                                  stream_, converter_->use_implicit_batch(),
+                                   batch_size));
+     cudaStreamSynchronize(stream_);
+     return OkStatus();
+@@ -1372,9 +1468,11 @@ class OpConverterTest : public ::testing::Test {
+     std::vector<int32_t> dims_vec;
+     TF_CHECK_OK(adap.Prepend(batch_size).Vector(&dims_vec));
+     AddTestTensorWithTFDims(name, dims_vec, trt_dtype);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     if (adap.IsStatic()) {
+       ASSERT_EQ(batch_size, converter_->batch_size_);
+     }
++#endif
+   }
+ 
+   // Adds weights for both validation and conversion. The type of the weight is
+@@ -1570,6 +1668,7 @@ class OpConverterTest : public ::testing::Test {
+   Logger& logger_ = *Logger::GetLogger();
+ 
+  private:
++  TrtUniquePtrType<nvinfer1::IRuntime> runtime_;
+   TrtUniquePtrType<nvinfer1::ICudaEngine> engine_;
+   cudaStream_t stream_;
+   std::unique_ptr<Allocator> tensor_buffer_allocator_;
+@@ -1592,7 +1691,13 @@ class OpConverterTest : public ::testing::Test {
+ class VariableOpConverterTest : public OpConverterTest {
+  public:
+   void Reset(TrtPrecisionMode precision_mode_to_test = TrtPrecisionMode::FP32,
+-             TrtTestMode trt_mode = TrtTestMode::kImplicitBatch) {
++             TrtTestMode trt_mode =
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                 TrtTestMode::kImplicitBatch
++#else
++                 TrtTestMode::kDynamicShape
++#endif
++  ) {
+     OpConverterTest::Reset(precision_mode_to_test, trt_mode, context_.get());
+   }
+ 
+@@ -8046,6 +8151,9 @@ void TestConvertSplit(OpConverterTest* test) {
+   }
+ }
+ 
++// TODO(benbarsdell): This test needs to be fixed in many places to support
++// non-implicit-batch for TRT10.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ TEST_F(OpConverterTest, ConvertSplit) {
+   {
+     // Axis is a tensor, should fail.
+@@ -8122,6 +8230,7 @@ TEST_F(OpConverterTest, ConvertSplit) {
+   TestConvertSplit<DT_HALF>(this);
+   TestConvertSplit<DT_INT32>(this);
+ }
++#endif
+ 
+ // Get the NodeDef for Unpack (Unstack in TF API).
+ auto get_unpack_nodedef = [](DataType dtype, int num, int axis) -> NodeDef {
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/ops/einsum.cc b/tensorflow/compiler/tf2tensorrt/convert/ops/einsum.cc
+index dea0eca7326..8f9d6cc13eb 100755
+--- a/tensorflow/compiler/tf2tensorrt/convert/ops/einsum.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/ops/einsum.cc
+@@ -311,6 +311,14 @@ class EinsumDescriptor {
+         builder->Shape(operand.tensor()->trt_tensor());
+     TRT_ENSURE_PTR_OK(shape_layer);
+     nvinfer1::ITensor* shape = (*shape_layer)->getOutput(0);
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    // TODO(benbarsdell): Casting to int32 makes this match the pre-TRT10
++    // behavior, but it would be better to instead cast the other int32
++    // tensors to int64.
++    shape = builder->Network()
++                ->addCast(*shape, nvinfer1::DataType::kINT32)
++                ->getOutput(0);
++#endif
+     for (int i = 0; i < operand.GetTrtDims().nbDims; i++) {
+       int idx = permute.empty() ? i : permute.at(i);
+       StatusOr<nvinfer1::ISliceLayer*> slice_layer =
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/ops/layer_utils.h b/tensorflow/compiler/tf2tensorrt/convert/ops/layer_utils.h
+index e3aadc279d9..3c656bff4ac 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/ops/layer_utils.h
++++ b/tensorflow/compiler/tf2tensorrt/convert/ops/layer_utils.h
+@@ -425,6 +425,14 @@ class TRTNetworkBuilder {
+     StatusOr<nvinfer1::IShapeLayer*> shape_layer = this->Shape(input);
+     TRT_ENSURE_PTR_OK(shape_layer);
+     nvinfer1::ITensor* runtime_shape = (*shape_layer)->getOutput(0);
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    // TODO(benbarsdell): Casting to int32 makes this match the pre-TRT10
++    // behavior, but it would be better to instead cast the other int32
++    // tensors to int64.
++    runtime_shape =
++        network_->addCast(*runtime_shape, nvinfer1::DataType::kINT32)
++            ->getOutput(0);
++#endif
+ 
+     if (sub_one) {
+       StatusOr<nvinfer1::IConstantLayer*> ones = this->Constant<int32>(1, 1);
+@@ -601,9 +609,9 @@ class TRTNetworkBuilder {
+       nvinfer1::ITensor* input, float quantize_scale, float dequantize_scale,
+       const std::string& name) {
+     TRT_ENSURE(input);
+-    if (!IS_TRT_VERSION_GE(8, 0, 0, 0)) {
+-      TRT_ENSURE(network_->hasExplicitPrecision());
+-    }
++#if !IS_TRT_VERSION_GE(8, 0, 0, 0)
++    TRT_ENSURE(network_->hasExplicitPrecision());
++#endif
+     TRT_ENSURE(IS_TRT_VERSION_GE(7, 1, 0, 0));
+ 
+     static int count = 0;
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/ops/like_ops.cc b/tensorflow/compiler/tf2tensorrt/convert/ops/like_ops.cc
+index dd9dd0f2304..646950c00a3 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/ops/like_ops.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/ops/like_ops.cc
+@@ -64,6 +64,15 @@ class ConvertLikeOps : public OpConverterBase<ConvertLikeOps<V>> {
+           builder->Shape(input.tensor()->trt_tensor());
+       TF_RETURN_IF_ERROR(shape_layer.status());
+       dims_input_tensor = (*shape_layer)->getOutput(0);
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++      // TODO(benbarsdell): Casting to int32 makes this match the pre-TRT10
++      // behavior, but it would be better to instead cast the other int32
++      // tensors to int64.
++      dims_input_tensor = network
++                              ->addCast(*dims_input_tensor->trt_tensor(),
++                                        nvinfer1::DataType::kINT32)
++                              ->getOutput(0);
++#endif
+       dims.nbDims = 0;
+     }
+ 
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/ops/tile.cc b/tensorflow/compiler/tf2tensorrt/convert/ops/tile.cc
+index 85c9c6a0292..f71dc70344c 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/ops/tile.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/ops/tile.cc
+@@ -169,6 +169,13 @@ class ConvertTile : public OpConverterBase<ConvertTile> {
+ 
+       nvinfer1::ITensor *shape =
+           network->addShape(input_trt_tensor)->getOutput(0);
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++      // TODO(benbarsdell): Casting to int32 makes this match the pre-TRT10
++      // behavior, but it would be better to instead cast all the other int32
++      // tensors to int64.
++      shape =
++          network->addCast(*shape, nvinfer1::DataType::kINT32)->getOutput(0);
++#endif
+       target_shape = network
+                          ->addElementWise(*shape, *mult,
+                                           nvinfer1::ElementWiseOperation::kPROD)
+@@ -179,7 +186,11 @@ class ConvertTile : public OpConverterBase<ConvertTile> {
+     DimsAdapter stride(std::vector<int>(nb_dims, 1));
+     auto layer = network->addSlice(input_trt_tensor, start, output_size,
+                                    stride.AsTrtDims());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     layer->setMode(nvinfer1::SliceMode::kWRAP);
++#else
++    layer->setMode(nvinfer1::SampleMode::kWRAP);
++#endif
+     if (target_shape) layer->setInput(2, *target_shape);
+ 
+     converter->SetLayerName(layer, params.node_def.name(), "to_tile");
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/timing_cache.cc b/tensorflow/compiler/tf2tensorrt/convert/timing_cache.cc
+index d9b4a9dc5e8..536d09d2eb5 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/timing_cache.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/timing_cache.cc
+@@ -70,7 +70,11 @@ void TimingCacheRegistry::Upsert(const string& name, TimingCache* cache) {
+     std::copy_n(static_cast<uint8_t*>(memory->data()), memory->size(),
+                 mem.begin());
+   }
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   memory->destroy();
++#else  // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  delete memory;
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+ #endif  // IS_TRT_VERSION_GE(8, 0, 0, 0)
+ }
+ 
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/trt_optimization_pass.cc b/tensorflow/compiler/tf2tensorrt/convert/trt_optimization_pass.cc
+index 5c49346940a..49faef71b16 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/trt_optimization_pass.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/trt_optimization_pass.cc
+@@ -47,7 +47,7 @@ using absl::StrCat;
+ namespace {
+ 
+ bool ShouldUseExplicitPrecision(const GraphDef& gdef) {
+-  if (!IS_TRT_VERSION_GE(8, 0, 0, 0)) {
++  if (!IS_TRT_VERSION_GE(8, 0, 0, 0) || IS_TRT_VERSION_GE(10, 0, 0, 0)) {
+     return false;
+   }
+   return absl::c_any_of(gdef.node(), [](const auto& node) {
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/utils.cc b/tensorflow/compiler/tf2tensorrt/convert/utils.cc
+index f2cc8be2fd0..bfc4f5dacaf 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/utils.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/utils.cc
+@@ -221,10 +221,21 @@ Status TrtTypeToTfType(nvinfer1::DataType trt_type, DataType* tf_type) {
+ }
+ 
+ int GetNumberOfEngineInputs(const nvinfer1::ICudaEngine* engine) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   int n_bindings = engine->getNbBindings();
++#else
++  int n_bindings = engine->getNbIOTensors();
++#endif
+   int n_input = 0;
+   for (int i = 0; i < n_bindings; i++) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     if (engine->bindingIsInput(i)) n_input++;
++#else
++    if (engine->getTensorIOMode(engine->getIOTensorName(i)) ==
++        nvinfer1::TensorIOMode::kINPUT) {
++      n_input++;
++    }
++#endif
+   }
+   // According to TensorRT 7 doc: "If the engine has been built for K profiles,
+   // the first getNbBindings() / K bindings are used by profile number 0, the
+@@ -232,7 +243,11 @@ int GetNumberOfEngineInputs(const nvinfer1::ICudaEngine* engine) {
+   // Therefore, to get the number of input tensors, we need to divide by the
+   // the number of profiles.
+   int n_profiles = engine->getNbOptimizationProfiles();
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   return n_input / n_profiles;
++#else
++  return n_input;
++#endif
+ }
+ 
+ absl::string_view GetDeviceName(const Node* node) {
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/utils.h b/tensorflow/compiler/tf2tensorrt/convert/utils.h
+index 9a03d2f9093..75f9a5218fa 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/utils.h
++++ b/tensorflow/compiler/tf2tensorrt/convert/utils.h
+@@ -228,7 +228,11 @@ class DimsAdapter {
+   //  in via the result pointer.
+   void TrtDims(nvinfer1::Dims* result) const {
+     result->nbDims = num_dims_;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     absl::c_copy(storage_, static_cast<int32_t*>(result->d));
++#else
++    absl::c_copy(storage_, static_cast<int64_t*>(result->d));
++#endif
+   }
+ 
+   // Converts to an nvinfer1::Dims and return by value.
+diff --git a/tensorflow/compiler/tf2tensorrt/convert/weights.cc b/tensorflow/compiler/tf2tensorrt/convert/weights.cc
+index da2157096b5..5b76fee995f 100644
+--- a/tensorflow/compiler/tf2tensorrt/convert/weights.cc
++++ b/tensorflow/compiler/tf2tensorrt/convert/weights.cc
+@@ -59,11 +59,19 @@ Status TRT_ShapedWeights::SetShape(DimsAdapter dims) {
+ size_t TRT_ShapedWeights::size_bytes() const {
+   size_t data_type_size = -1;
+   switch (type_) {
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    case nvinfer1::DataType::kINT64:
++      data_type_size = 8;
++      break;
++#endif
+     case nvinfer1::DataType::kFLOAT:
+     case nvinfer1::DataType::kINT32:
+       data_type_size = 4;
+       break;
+     case nvinfer1::DataType::kHALF:
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    case nvinfer1::DataType::kBF16:
++#endif
+       data_type_size = 2;
+       break;
+ #if IS_TRT_VERSION_GE(8, 5, 0, 0)
+@@ -76,6 +84,10 @@ size_t TRT_ShapedWeights::size_bytes() const {
+     case nvinfer1::DataType::kBOOL:
+       data_type_size = 1;
+       break;
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    case nvinfer1::DataType::kINT4:  // Not supported
++      return 0;
++#endif
+   }
+   return volume_ * data_type_size;
+ }
+diff --git a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op.cc b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op.cc
+index 7a74a43d88a..cfa92bbdaee 100644
+--- a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op.cc
++++ b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op.cc
+@@ -77,7 +77,11 @@ class ContextDeviceMemory {
+ 
+   ~ContextDeviceMemory() {
+     if (device_memory_) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       device_memory_allocator_->free(device_memory_);
++#else
++      device_memory_allocator_->deallocate(device_memory_);
++#endif
+     }
+   }
+ 
+@@ -194,7 +198,8 @@ class TRTEngineOp : public AsyncOpKernel {
+   StatusOr<TrtUniquePtrType<nvinfer1::ICudaEngine>> BuildEngine(
+       const std::vector<TensorShape>& input_concrete_shapes, int batch_size,
+       bool use_calibration, TRTInt8Calibrator* calibrator,
+-      TRTEngineCacheResource* cache_resource, OpKernelContext* ctx);
++      TRTEngineCacheResource* cache_resource, OpKernelContext* ctx,
++      nvinfer1::IRuntime* runtime);
+ 
+   // Verify that the input shapes are consistent and can be handled by this op.
+   Status VerifyInputShapes(const std::vector<TensorShape>& shapes);
+@@ -222,6 +227,7 @@ class TRTEngineOp : public AsyncOpKernel {
+   bool calibration_mode_;
+ 
+   // Whether to use implicit batch dimension for TensorRT.
++  // Note that this is no longer supported since TensorRT 10.0.
+   bool use_implicit_batch_;
+ 
+   // Whether to collect optimization profiles for TensorRT, only used when
+@@ -498,6 +504,12 @@ TRTEngineOp::TRTEngineOp(OpKernelConstruction* context)
+             << ", thus setting _use_implicit_batch=true";
+     use_implicit_batch_ = true;
+   }
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++  OP_REQUIRES(
++      context, !use_implicit_batch_,
++      errors::InvalidArgument(
++          "_use_implicit_batch must be false when using TensorRT >= 10.0"));
++#endif
+ 
+   status =
+       context->GetAttr("_profile_generation_mode", &profile_generation_mode_);
+@@ -1003,18 +1015,35 @@ Status TRTEngineOp::ExecuteTrtEngine(
+     VLOG(2) << "  Workspace size: " << cuda_engine->getWorkspaceSize()
+             << " bytes";
+ #endif  // #if !IS_TRT_VERSION_GE(8, 0, 0, 0)
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     VLOG(2) << "  Datatype of " << cuda_engine->getNbBindings()
++#else
++    VLOG(2) << "  Datatype of " << cuda_engine->getNbIOTensors()
++#endif
+             << " inputs/outputs";
+     string binding_types = "";
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     for (int i = 0; i < cuda_engine->getNbBindings(); i++) {
+       binding_types += "    " + string(cuda_engine->getBindingName(i)) + ": " +
+                        DebugString(cuda_engine->getBindingDataType(i)) + "\n";
+     }
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++    for (int i = 0; i < cuda_engine->getNbIOTensors(); i++) {
++      binding_types += "    " + string(cuda_engine->getIOTensorName(i)) + ": " +
++                       DebugString(cuda_engine->getTensorDataType(
++                           cuda_engine->getIOTensorName(i))) +
++                       "\n";
++    }
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+     VLOG(2) << binding_types;
+   }
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   const int num_binding = cuda_engine->getNbBindings();
+   std::vector<void*> buffers(num_binding);
++#else
++  const int num_binding = cuda_engine->getNbIOTensors();
++#endif
+ 
+   // nvinfer1::IExecutionContext::enqueue is not thread safe and we need a mutex
+   // for it.
+@@ -1031,11 +1060,17 @@ Status TRTEngineOp::ExecuteTrtEngine(
+       use_implicit_batch_ ? ctx->input(0).shape().dim_size(0) : 0;
+ 
+   TF_RETURN_IF_ERROR(SetTrtEngineInputs(
+-      cuda_engine, execution_context, trt_context_idx, buffers,
++      cuda_engine, execution_context, trt_context_idx,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++      buffers,
++#endif
+       use_implicit_batch_, num_batch, profiles, ctx));
+ 
+   TF_RETURN_IF_ERROR(SetTrtEngineOutputs(cuda_engine, execution_context,
+-                                         trt_context_idx, buffers,
++                                         trt_context_idx,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                         buffers,
++#endif
+                                          use_implicit_batch_, num_batch, ctx));
+ 
+   // Copied from gpu_kernel_helper.h as the header can only be used in *.cu.cc
+@@ -1054,8 +1089,11 @@ Status TRTEngineOp::ExecuteTrtEngine(
+         execution_context, allocator, engine_context->GetDeviceMemorySize()));
+   }
+   // Enqueue the TensorRT engine for execution.
+-  return TrtEnqueue(execution_context, buffers, stream, use_implicit_batch_,
+-                    num_batch);
++  return TrtEnqueue(execution_context,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                    buffers,
++#endif
++                    stream, use_implicit_batch_, num_batch);
+ }
+ 
+ Status TRTEngineOp::GetEngineCacheResource(OpKernelContext* ctx,
+@@ -1087,7 +1125,8 @@ Status TRTEngineOp::GetEngineCacheResource(OpKernelContext* ctx,
+ StatusOr<TrtUniquePtrType<nvinfer1::ICudaEngine>> TRTEngineOp::BuildEngine(
+     const std::vector<TensorShape>& input_concrete_shapes, int batch_size,
+     bool use_calibration, TRTInt8Calibrator* calibrator,
+-    TRTEngineCacheResource* cache_resource, OpKernelContext* ctx) {
++    TRTEngineCacheResource* cache_resource, OpKernelContext* ctx,
++    nvinfer1::IRuntime* runtime) {
+   tensorflow::profiler::TraceMe activity(
+       "TRTEngineOp::BuildEngine", tensorflow::profiler::TraceMeLevel::kInfo);
+   TRT_ENSURE(cache_resource);
+@@ -1116,9 +1155,9 @@ StatusOr<TrtUniquePtrType<nvinfer1::ICudaEngine>> TRTEngineOp::BuildEngine(
+   auto status = convert::ConvertGraphDefToEngine(
+       segment_graph_def_, ctx, precision_mode_, batch_size, workspace_size_,
+       conversion_input_shapes, &logger, cache_resource->allocator_.get(),
+-      calibrator, &engine, use_calibration, use_implicit_batch_, nullptr,
+-      &cache_resource->profiles_, name(), use_explicit_precision_, &cluster,
+-      ctx->device()->name());
++      runtime, calibrator, &engine, use_calibration, use_implicit_batch_,
++      nullptr, &cache_resource->profiles_, name(), use_explicit_precision_,
++      &cluster, ctx->device()->name());
+   if (!status.ok()) {
+     LOG_FIRST_FEW_WARNING_WITH_PREFIX
+         << "Engine creation for " << name() << " failed. "
+@@ -1152,6 +1191,9 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
+     return std::pair<EngineContext*, int>(&empty_context, 0);
+   }
+ 
++  TrtUniquePtrType<IRuntime> infer(nvinfer1::createInferRuntime(logger));
++  infer->setGpuAllocator(allocator);
++
+   // Handle the static engine case. For static engines, the cache will have a
+   // single element containing the only engine.
+   if (static_engine_) {
+@@ -1172,14 +1214,17 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
+       return std::pair<EngineContext*, int>(&empty_context, 0);
+     }
+ 
+-    TrtUniquePtrType<IRuntime> infer(nvinfer1::createInferRuntime(logger));
+-    infer->setGpuAllocator(allocator);
+     // Need to initialize plugins in order to deserialize engines that contain
+     // plugins.
+     MaybeInitializeTrtPlugins(&logger);
+     TrtUniquePtrType<nvinfer1::ICudaEngine> static_engine(
+         infer->deserializeCudaEngine(serialized_segment_.c_str(),
+-                                     serialized_segment_.size(), nullptr));
++                                     serialized_segment_.size()
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                         ,
++                                     nullptr
++#endif
++                                     ));
+     int profile_id = 0;
+     if (static_engine && !use_implicit_batch_) {
+       // load profiles
+@@ -1189,7 +1234,8 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
+       TF_RETURN_IF_ERROR(cache_res->profiles_.CreateExecutionContexts(
+           static_engine.get(), &exec_contexts));
+       cache.emplace(input_concrete_shapes,
+-                    std::make_unique<EngineContext>(std::move(static_engine),
++                    std::make_unique<EngineContext>(std::move(infer),
++                                                    std::move(static_engine),
+                                                     std::move(exec_contexts)));
+       VLOG(1) << "Added new engine to cache of " << name()
+               << ". Cache size: " << cache.size();
+@@ -1218,9 +1264,10 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
+                                             << "Reason: " << status;
+         }
+       }
+-      auto result = BuildEngine(input_concrete_shapes, batch_size,
+-                                /*use_calibration=*/false,
+-                                /*calibrator=*/nullptr, cache_res, ctx);
++      auto result =
++          BuildEngine(input_concrete_shapes, batch_size,
++                      /*use_calibration=*/false,
++                      /*calibrator=*/nullptr, cache_res, ctx, infer.get());
+       if (!result.ok()) {
+         return std::pair<EngineContext*, int>(&empty_context, 0);
+       }
+@@ -1232,20 +1279,27 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
+ 
+     int max_batch_size = 1;
+     if (use_implicit_batch_) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       max_batch_size = raw_static_engine->getMaxBatchSize();
+       // Static engine will have max_batch_size for batch size so that all
+       // inputs will map to this single engine.
+       for (int i = 0; i < engine_input_shapes.size(); i++) {
+         engine_input_shapes[i].set_dim(0, max_batch_size);
+       }
++#else
++      return errors::Internal(
++          "Implicit batch is not supported since TensorRT 10.0. Pass "
++          "use_dynamic_shape=True to TrtGraphConverterV2 to avoid this error.");
++#endif
+     }
+ 
+     ExecutionContext context = ExecutionContext::Create(raw_static_engine);
+     // TODO(laigd): here we assume engine_input_shapes matches the actual input
+     // shapes of the engine, we should verify that.
+-    cache.emplace(engine_input_shapes,
+-                  std::make_unique<EngineContext>(std::move(static_engine),
+-                                                  std::move(context)));
++    cache.emplace(
++        engine_input_shapes,
++        std::make_unique<EngineContext>(
++            std::move(infer), std::move(static_engine), std::move(context)));
+     // Runtime is safe to delete after engine creation
+     VLOG(1) << "Size of serialized TRT engine: "
+             << serialized_segment_.capacity();
+@@ -1294,7 +1348,7 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
+     // means calibration_mode_ is true and this path won't get executed.
+     auto result =
+         BuildEngine(input_concrete_shapes, batch_size, use_calibration_,
+-                    calibrator_.get(), cache_res, ctx);
++                    calibrator_.get(), cache_res, ctx, infer.get());
+     if (!result.ok()) {
+       return std::pair<EngineContext*, int>(&empty_context, 0);
+     }
+@@ -1302,9 +1356,10 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
+     std::vector<ExecutionContext> exec_contexts;
+     TF_RETURN_IF_ERROR(cache_res->profiles_.CreateExecutionContexts(
+         engine.get(), &exec_contexts));
+-    cache.emplace(input_concrete_shapes,
+-                  std::make_unique<EngineContext>(std::move(engine),
+-                                                  std::move(exec_contexts)));
++    cache.emplace(
++        input_concrete_shapes,
++        std::make_unique<EngineContext>(std::move(infer), std::move(engine),
++                                        std::move(exec_contexts)));
+     VLOG(1) << "Added new engine to cache of " << name()
+             << ". Cache size: " << cache.size();
+     engine_contexts = cache.at(input_concrete_shapes).get();
+@@ -1390,6 +1445,9 @@ Status TRTEngineOp::AllocateCalibrationResources(
+                        grappler::GetDeviceInfo(full_parsed_name));
+     tensorflow::grappler::VirtualCluster cluster(device_map);
+ 
++    TrtUniquePtrType<IRuntime> infer(nvinfer1::createInferRuntime(logger));
++    infer->setGpuAllocator(cache_res->allocator_.get());
++
+     // ConvertGraphDefToEngine() will try to build the engine. This thread
+     // will loop inside buildCudaEngine() consuming the calibration data
+     // that is set by the TF op, and drive the builder until calibrator
+@@ -1402,7 +1460,8 @@ Status TRTEngineOp::AllocateCalibrationResources(
+         this->segment_graph_def_, ctx, TrtPrecisionMode::INT8,
+         cres->calibrator_->getBatchSize(), this->workspace_size_,
+         conversion_input_shapes, &cache_res->GetLogger(),
+-        cache_res->allocator_.get(), cres->calibrator_.get(), &cres->engine_,
++        cache_res->allocator_.get(), infer.get(),
++        cres->calibrator_.get(), &cres->engine_,
+         /*use_calibration=*/true, this->use_implicit_batch_,
+         /*convert_successfully=*/nullptr,
+         /*profiles=*/&cache_res->profiles_, name(),
+@@ -1423,13 +1482,15 @@ Status TRTEngineOp::AllocateCalibrationResources(
+         auto calib_result = cache_res->profiles_.CreateExecutionContexts(
+             cres->engine_.get(), &exec_contexts);
+         cache_res->cache_.emplace(
+-            shapes, std::make_unique<EngineContext>(std::move(cres->engine_),
++            shapes, std::make_unique<EngineContext>(std::move(infer),
++                                                    std::move(cres->engine_),
+                                                     std::move(exec_contexts)));
+       } else {
+         ExecutionContext context =
+             ExecutionContext::Create(cres->engine_.get());
+         cache_res->cache_.emplace(
+-            shapes, std::make_unique<EngineContext>(std::move(cres->engine_),
++            shapes, std::make_unique<EngineContext>(std::move(infer),
++                                                    std::move(cres->engine_),
+                                                     std::move(context)));
+       }
+     }
+diff --git a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op_test.cc b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op_test.cc
+index 317f3a54357..3368d3d4754 100644
+--- a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op_test.cc
++++ b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_op_test.cc
+@@ -66,7 +66,12 @@ class TRTEngineOpTestBase : public OpsTestBase {
+  public:
+   void AddSimpleTrtOp(DataType dtype, int max_cached_engines_count = 1,
+                       PartialTensorShape shape = PartialTensorShape({-1, -1}),
+-                      bool use_implicit_batch = true,
++                      bool use_implicit_batch
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                      = true,
++#else
++                      = false,
++#endif
+                       bool allow_build_at_runtime = true,
+                       bool static_engine = false) {
+     // Create the GPU device.
+@@ -207,6 +212,7 @@ constexpr std::array<TestParam, 2> TestParameters{TestParam{false},
+ INSTANTIATE_TEST_CASE_P(TRTEngineOpTestInstantiation, TRTEngineOpTestWithParam,
+                         ::testing::ValuesIn(TestParameters));
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ TEST_F(TRTEngineOpTestBase, DynamicEngines) {
+   // Test dynamic engine creation during inference time
+   TRTEngineOpTestBase::AddSimpleTrtOp(DT_FLOAT, /*max_cached_engines_count=*/4);
+@@ -256,11 +262,16 @@ TEST_F(TRTEngineOpTestBase, DynamicEngines) {
+   EXPECT_EQ(1, cache->count({TensorShape({3, 2})}));
+   EXPECT_EQ(1, cache->count({TensorShape({10, 10})}));
+ }
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ 
+ TEST_F(TRTEngineOpTestBase, AllowBuildAtRuntime) {
+   TRTEngineOpTestBase::AddSimpleTrtOp(DT_FLOAT, /*max_cached_engines_count=*/1,
+                                       PartialTensorShape({-1, -1}),
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+                                       /*use_implicit_batch=*/true,
++#else
++                                      /*use_implicit_batch=*/false,
++#endif
+                                       /*allow_build_at_runtime=*/false);
+ 
+   // Execute the op
+diff --git a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops.cc b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops.cc
+index 234330e328a..23ca2fc5b53 100644
+--- a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops.cc
++++ b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops.cc
+@@ -147,7 +147,12 @@ class InitializeTRTResource : public OpKernel {
+       TrtUniquePtrType<nvinfer1::ICudaEngine> engine(
+           infer->deserializeCudaEngine(
+               engine_instance.serialized_engine().c_str(),
+-              engine_instance.serialized_engine().size(), nullptr));
++              engine_instance.serialized_engine().size()
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                  ,
++              nullptr
++#endif
++              ));
+       auto raw_engine = engine.get();
+       std::vector<ExecutionContext> ctx_vec;
+       if (num_loaded_engine == 0) {
+@@ -163,9 +168,10 @@ class InitializeTRTResource : public OpKernel {
+         // we have only a single execution context.
+         ctx_vec.push_back(ExecutionContext::Create(raw_engine));
+       }
+-      resource->cache_.emplace(engine_input_shapes,
+-                               std::make_unique<EngineContext>(
+-                                   std::move(engine), std::move(ctx_vec)));
++      resource->cache_.emplace(
++          engine_input_shapes,
++          std::make_unique<EngineContext>(std::move(infer), std::move(engine),
++                                          std::move(ctx_vec)));
+       ++num_loaded_engine;
+     } while (1);
+     VLOG(1) << "Loaded " << num_loaded_engine << " TRT engines for op "
+diff --git a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops_test.cc b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops_test.cc
+index 987b01eebcb..28debd542fd 100644
+--- a/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops_test.cc
++++ b/tensorflow/compiler/tf2tensorrt/kernels/trt_engine_resource_ops_test.cc
+@@ -119,7 +119,11 @@ class TRTEngineResourceOpsTest
+     return layer->getOutput(0);
+   }
+ 
+-  TrtUniquePtrType<nvinfer1::ICudaEngine> CreateTRTEngine() {
++  std::pair<TrtUniquePtrType<nvinfer1::ICudaEngine>,
++            TrtUniquePtrType<nvinfer1::IRuntime>>
++  CreateTRTEngine() {
++    TrtUniquePtrType<nvinfer1::IRuntime> runtime(
++        nvinfer1::createInferRuntime(logger_));
+     TrtUniquePtrType<nvinfer1::IBuilder> builder(
+         nvinfer1::createInferBuilder(logger_));
+     TrtUniquePtrType<nvinfer1::INetworkDefinition> network;
+@@ -155,8 +159,13 @@ class TRTEngineResourceOpsTest
+     // Build the engine
+     TrtUniquePtrType<nvinfer1::IBuilderConfig> builder_config(
+         builder->createBuilderConfig());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     builder_config->setMaxWorkspaceSize(1 << 10);
+     builder->setMaxBatchSize(1);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++    builder_config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,
++                                       1 << 10);
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+ 
+     if (this->param_.dynamic_shape) {
+       TrtShapeOptimizationProfile profile;
+@@ -205,11 +214,18 @@ class TRTEngineResourceOpsTest
+                                            network.get()));
+     }
+     VLOG(2) << "ConfigureBuilder Finished";
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     TrtUniquePtrType<nvinfer1::ICudaEngine> engine(
+         builder->buildEngineWithConfig(*network, *builder_config));
++#else
++    TrtUniquePtrType<nvinfer1::IHostMemory> serialized(
++        builder->buildSerializedNetwork(*network, *builder_config));
++    TrtUniquePtrType<nvinfer1::ICudaEngine> engine(
++        runtime->deserializeCudaEngine(serialized->data(), serialized->size()));
++#endif
+     VLOG(2) << "Engine constructed";
+     EXPECT_NE(nullptr, engine);
+-    return engine;
++    return {std::move(engine), std::move(runtime)};
+   }
+   Logger& logger_ = *Logger::GetLogger();
+   TestParam param_;
+@@ -278,7 +294,11 @@ TEST_P(TRTEngineResourceOpsTest, Basic) {
+   EXPECT_EQ(0, resource->cache_.size());
+ 
+   // Create an engine and add it to the cache of the resource.
+-  TrtUniquePtrType<nvinfer1::ICudaEngine> engine = CreateTRTEngine();
++  auto engine_and_runtime = CreateTRTEngine();
++  TrtUniquePtrType<nvinfer1::ICudaEngine> engine =
++      std::move(engine_and_runtime.first);
++  TrtUniquePtrType<nvinfer1::IRuntime> runtime =
++      std::move(engine_and_runtime.second);
+   ExecutionContext context = ExecutionContext::Create(engine.get());
+ 
+   std::vector<TensorShape> engine_input_shape(1);
+@@ -288,7 +308,8 @@ TEST_P(TRTEngineResourceOpsTest, Basic) {
+   }
+   resource->cache_.emplace(
+       engine_input_shape,
+-      std::make_unique<EngineContext>(std::move(engine), std::move(context)));
++      std::make_unique<EngineContext>(std::move(runtime), std::move(engine),
++                                      std::move(context)));
+   // Check that the resource has multiple references before it is unregistered
+   // from the resource manager.
+   EXPECT_FALSE(resource->RefCountIsOne());
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+index 8fc3c6e478f..c083e9f00a7 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_plugin_stub.cc
+@@ -52,7 +52,7 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+ 
+ #if NV_TENSORRT_MAJOR < 7
+ #error TensorRT version earlier than 7 is not supported.
+-#elif NV_TENSORRT_MAJOR == 7 || NV_TENSORRT_MAJOR == 8
++#elif NV_TENSORRT_MAJOR == 7 || NV_TENSORRT_MAJOR == 8 || NV_TENSORRT_MAJOR == 10
+ #include "tensorflow/compiler/tf2tensorrt/stub/NvInferPlugin_7_0.inc"
+ #else
+ #error This version of TensorRT is not supported.
+diff --git a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+index 1a4964032ba..a80e338b13e 100644
+--- a/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
++++ b/tensorflow/compiler/tf2tensorrt/stub/nvinfer_stub.cc
+@@ -56,6 +56,8 @@ void LogFatalSymbolNotFound(const char* symbol_name) {
+ #include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_7_0.inc"
+ #elif NV_TENSORRT_MAJOR == 8
+ #include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_8_0.inc"
++#elif NV_TENSORRT_MAJOR == 10
++#include "tensorflow/compiler/tf2tensorrt/stub/NvInfer_10_0.inc"
+ #else
+ #error This version of TensorRT is not supported.
+ #endif
+diff --git a/tensorflow/compiler/tf2tensorrt/tensorrt_test.cc b/tensorflow/compiler/tf2tensorrt/tensorrt_test.cc
+index 28da5e81da7..732e758bc57 100644
+--- a/tensorflow/compiler/tf2tensorrt/tensorrt_test.cc
++++ b/tensorflow/compiler/tf2tensorrt/tensorrt_test.cc
+@@ -157,27 +157,50 @@ TrtUniquePtrType<nvinfer1::IHostMemory> CreateSerializedEngine() {
+ #endif
+ 
+   // Build the engine.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   builder->setMaxBatchSize(1);
++#endif
+   TrtUniquePtrType<nvinfer1::IBuilderConfig> builderConfig(
+       builder->createBuilderConfig());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   builderConfig->setMaxWorkspaceSize(1 << 20);
+   TrtUniquePtrType<nvinfer1::ICudaEngine> engine(
+       builder->buildEngineWithConfig(*network, *builderConfig));
+   EXPECT_NE(engine, nullptr);
+   // Serialize the engine to create a model, then close everything.
+   TrtUniquePtrType<nvinfer1::IHostMemory> model(engine->serialize());
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  builderConfig->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,
++                                    1 << 20);
++  TrtUniquePtrType<nvinfer1::IHostMemory> model(
++      builder->buildSerializedNetwork(*network, *builderConfig));
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   return model;
+ }
+ 
+ template <typename T>
+-unsigned GetBindingSizeBytes(const nvinfer1::ICudaEngine& engine, int index,
++unsigned GetBindingSizeBytes(const nvinfer1::ICudaEngine& engine,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                             int index,
++#else
++                             const char* name,
++#endif
+                              unsigned batch_size) {
+   unsigned vol = batch_size;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   auto dims = engine.getBindingDimensions(index);
+-  int vecDim = engine.getBindingVectorizedDim(index);
++  int vecDim = engine.getBindingVectorizedDim(name);
++#else
++  auto dims = engine.getTensorShape(name);
++  int vecDim = engine.getTensorVectorizedDim(name);
++#endif
+   if (-1 != vecDim)  // i.e., 0 != lgScalarsPerVector
+   {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     int scalarsPerVec = engine.getBindingComponentsPerElement(index);
++#else
++    int scalarsPerVec = engine.getTensorComponentsPerElement(name);
++#endif
+     // Divide round up.
+     dims.d[vecDim] = (dims.d[vecDim] + scalarsPerVec - 1 / scalarsPerVec);
+     vol *= scalarsPerVec;
+@@ -192,17 +215,32 @@ void Execute(nvinfer1::IExecutionContext* context, const float* input1,
+   const nvinfer1::ICudaEngine& engine = context->getEngine();
+ 
+   // We have two bindings: input and output.
+-  ASSERT_EQ(engine.getNbBindings(), 4);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++  int num_bindings = engine.getNbBindings();
+   const int input_index1 = engine.getBindingIndex(kInputTensor1);
+   const int input_index2 = engine.getBindingIndex(kInputTensor2);
+   const int output_index1 = engine.getBindingIndex(kOutputTensor1);
+   const int output_index2 = engine.getBindingIndex(kOutputTensor2);
++#else
++  int num_bindings = engine.getNbIOTensors();
++#endif
++  ASSERT_EQ(num_bindings, 4);
+ 
+   // Create GPU buffers and a stream
+-  std::vector<void*> buffers(engine.getNbBindings());
++  std::vector<void*> buffers(num_bindings);
+   for (int i = 0; i < buffers.size(); i++) {
+-    ASSERT_EQ(
+-        0, cudaMalloc(&buffers[i], GetBindingSizeBytes<float>(engine, i, 1)));
++    ASSERT_EQ(0, cudaMalloc(&buffers[i], GetBindingSizeBytes<float>(engine,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                                                    i,
++#else
++                                                                    engine
++                                                                        .getIOTensorName(
++                                                                            i),
++#endif
++                                                                    1)));
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    context->setTensorAddress(engine.getIOTensorName(i), buffers[i]);
++#endif
+   }
+ 
+   cudaStream_t stream;
+@@ -213,17 +251,26 @@ void Execute(nvinfer1::IExecutionContext* context, const float* input1,
+   // Note that since the host buffer was not created as pinned memory, these
+   // async copies are turned into sync copies. So the following synchronization
+   // could be removed.
+-  ASSERT_EQ(0, cudaMemcpyAsync(buffers[input_index1], input1, sizeof(float),
++  ASSERT_EQ(0, cudaMemcpyAsync(buffers[0], input1, sizeof(float),
+                                cudaMemcpyHostToDevice, stream));
+-  ASSERT_EQ(0, cudaMemcpyAsync(buffers[input_index2], input2, sizeof(float),
++  ASSERT_EQ(0, cudaMemcpyAsync(buffers[1], input2, sizeof(float),
+                                cudaMemcpyHostToDevice, stream));
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   context->enqueueV2(buffers.data(), stream, nullptr);
+-  ASSERT_EQ(0, cudaMemcpyAsync(output1, buffers[output_index1], sizeof(float),
++#else
++  context->enqueueV3(stream);
++#endif
++  ASSERT_EQ(0, cudaMemcpyAsync(output1, buffers[2], sizeof(float),
++                               cudaMemcpyDeviceToHost, stream));
++  ASSERT_EQ(0, cudaMemcpyAsync(output2, buffers[3],
++                               GetBindingSizeBytes<int32>(engine,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                                          output_index2,
++#else
++                                                          kOutputTensor2,
++#endif
++                                                          1),
+                                cudaMemcpyDeviceToHost, stream));
+-  ASSERT_EQ(
+-      0, cudaMemcpyAsync(output2, buffers[output_index2],
+-                         GetBindingSizeBytes<int32>(engine, output_index2, 1),
+-                         cudaMemcpyDeviceToHost, stream));
+   cudaStreamSynchronize(stream);
+ 
+   // Release the stream and the buffers
+@@ -253,8 +300,13 @@ TEST(TensorrtTest, BasicFunctions) {
+   Logger& logger = *Logger::GetLogger();
+   TrtUniquePtrType<nvinfer1::IRuntime> runtime(
+       nvinfer1::createInferRuntime(logger));
+-  TrtUniquePtrType<nvinfer1::ICudaEngine> engine(
+-      runtime->deserializeCudaEngine(model->data(), model->size(), nullptr));
++  TrtUniquePtrType<nvinfer1::ICudaEngine> engine(runtime->deserializeCudaEngine(
++      model->data(), model->size()
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                         ,
++      nullptr
++#endif
++      ));
+   TrtUniquePtrType<nvinfer1::IExecutionContext> context(
+       engine->createExecutionContext());
+ 
+@@ -262,11 +314,25 @@ TEST(TensorrtTest, BasicFunctions) {
+   float input1 = 1234;
+   float input2 = 567;
+ 
+-  std::vector<float> output1(
+-      GetBindingSizeBytes<float>(*engine, 2, 1) / sizeof(float), 0.0f);
++  std::vector<float> output1(GetBindingSizeBytes<float>(*engine,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                                        2,
++#else
++                                                        kOutputTensor1,
++#endif
++                                                        1) /
++                                 sizeof(float),
++                             0.0f);
+ 
+-  std::vector<float> output2(
+-      GetBindingSizeBytes<int32>(*engine, 3, 1) / sizeof(int32), 0.0f);
++  std::vector<float> output2(GetBindingSizeBytes<int32>(*engine,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                                        3,
++#else
++                                                        kOutputTensor2,
++#endif
++                                                        1) /
++                                 sizeof(int32),
++                             0.0f);
+ 
+   ASSERT_EQ(output1.size(), 1);
+   ASSERT_EQ(output2.size(), 1);
+diff --git a/tensorflow/compiler/tf2tensorrt/trt_convert_api_test.cc b/tensorflow/compiler/tf2tensorrt/trt_convert_api_test.cc
+index 74415d85686..10264da8e98 100644
+--- a/tensorflow/compiler/tf2tensorrt/trt_convert_api_test.cc
++++ b/tensorflow/compiler/tf2tensorrt/trt_convert_api_test.cc
+@@ -297,6 +297,7 @@ INSTANTIATE_TEST_CASE_P(
+                           true   // convert_to_static_engine
+                       },
+                       {{1, 2}, {4, 2}}},
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+             // Implicit batch mode test with conver_to_static_engine=true.
+             TestParam{TfTrtConversionParams{
+                           1 << 20,  // max workspace size
+@@ -310,6 +311,7 @@ INSTANTIATE_TEST_CASE_P(
+                           true   // convert_to_static_engine
+                       },
+                       {{1, 2}}},
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
+             // Dynamic shape mode test convert_to_static_engine=false: we cannot
+             // save the engines, therefore we do not generate profiles. A single
+             // engine will be built during runtime, with profile that matches
+@@ -326,7 +328,9 @@ INSTANTIATE_TEST_CASE_P(
+                           true,  // allow_build_at_runtime
+                           false  // convert_to_static_engine
+                       },
+-                      {{1, 2}, {4, 2}}},
++                      {{1, 2}, {4, 2}}}
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++            ,
+             // Implicit batch mode test with convert_to_static_engine=false.
+             // We will have two engines in the cache to handle the two shapes.
+             TestParam{TfTrtConversionParams{
+@@ -340,7 +344,9 @@ INSTANTIATE_TEST_CASE_P(
+                           true,  // allow_build_at_runtime
+                           false  // convert_to_static_engine
+                       },
+-                      {{1, 2}, {4, 2}}}),
++                      {{1, 2}, {4, 2}}}
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
++        ),
+         ::testing::Values(false, true),    // use_variables
+         ::testing::Values(false, true)));  // use_function
+ 
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.cc b/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.cc
+index 832154940f3..ad3da4fbe3e 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.cc
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.cc
+@@ -95,7 +95,11 @@ TRTDeviceAllocator::TRTDeviceAllocator(Allocator* allocator)
+   VLOG(1) << "Using " << allocator->Name() << " allocator from TensorFlow";
+ }
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ void TRTDeviceAllocator::free(void* memory) noexcept {
++#else
++bool TRTDeviceAllocator::deallocate(void* memory) noexcept {
++#endif
+   mutex_lock lock(mu_);
+   VLOG(2) << "Deallocating @ " << memory;
+   // allocated memory adjusted for alignment, restore the original pointer
+@@ -107,6 +111,9 @@ void TRTDeviceAllocator::free(void* memory) noexcept {
+     }
+     allocator_->DeallocateRaw(memory);
+   }
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++  return true;
++#endif
+ }
+ 
+ }  // namespace tensorrt
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.h b/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.h
+index 2812aa06457..3beaf368e68 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.h
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_allocator.h
+@@ -18,6 +18,7 @@ limitations under the License.
+ 
+ #include <unordered_map>
+ 
++#include "tensorflow/compiler/tf2tensorrt/common/utils.h"
+ #include "tensorflow/core/framework/allocator.h"
+ #include "tensorflow/core/platform/mutex.h"
+ 
+@@ -56,7 +57,11 @@ class TRTDeviceAllocator : public TRTBaseAllocator {
+   }
+   void* allocate(uint64_t size, uint64_t alignment,
+                  uint32_t flags) noexcept override;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   void free(void* memory) noexcept override;
++#else
++  bool deallocate(void* memory) noexcept override;
++#endif
+ 
+  private:
+   mutex mu_;
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc b/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc
+index 798ebd8bd0c..38ea076fe5b 100755
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.cc
+@@ -38,9 +38,16 @@ using absl::StrCat;
+ 
+ ExecutionContext ExecutionContext::Create(nvinfer1::ICudaEngine* cuda_engine) {
+   bool has_int32_output = false;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   for (int i = 0; i < cuda_engine->getNbBindings(); i++) {
+     if (!cuda_engine->bindingIsInput(i) &&
+         cuda_engine->getBindingDataType(i) == nvinfer1::DataType::kINT32) {
++#else
++  for (int i = 0; i < cuda_engine->getNbIOTensors(); i++) {
++    const char* tensor_name = cuda_engine->getIOTensorName(i);
++    if (cuda_engine->getTensorIOMode(tensor_name) == nvinfer1::TensorIOMode::kOUTPUT &&
++        cuda_engine->getTensorDataType(tensor_name) == nvinfer1::DataType::kINT32) {
++#endif
+       has_int32_output = true;
+       break;
+     }
+@@ -59,14 +66,24 @@ ExecutionContext ExecutionContext::Create(nvinfer1::ICudaEngine* cuda_engine) {
+ 
+ Status GetTrtBindingShape(const nvinfer1::ICudaEngine* cuda_engine,
+                           const nvinfer1::IExecutionContext* execution_context,
+-                          int binding_index, bool use_implicit_batch,
+-                          int batch_size, TensorShape& shape) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                          int binding_index,
++#else
++                          const char* tensor_name,
++#endif
++                          bool use_implicit_batch, int batch_size,
++                          TensorShape& shape) {
+   tensorflow::profiler::TraceMe activity(
+       "getBindingDimensions", tensorflow::profiler::TraceMeLevel::kInfo);
+   nvinfer1::Dims dims =
+       use_implicit_batch
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+           ? cuda_engine->getBindingDimensions(binding_index)
+           : execution_context->getBindingDimensions(binding_index);
++#else
++          ? cuda_engine->getTensorShape(tensor_name)
++          : execution_context->getTensorShape(tensor_name);
++#endif
+   if (!use_implicit_batch) {
+     if (dims.nbDims == -1) {
+       return errors::Internal(
+@@ -80,39 +97,83 @@ Status GetTrtBindingShape(const nvinfer1::ICudaEngine* cuda_engine,
+   return OkStatus();
+ }
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ Status SetupBindings(nvinfer1::ICudaEngine* cuda_engine, const Tensor& tensor,
+                      std::vector<void*>& buffers, int binding_index) {
++#else
++Status SetupBindings(nvinfer1::ICudaEngine* cuda_engine,
++                     nvinfer1::IExecutionContext* execution_context,
++                     const Tensor& tensor, const char* tensor_name) {
++#endif
+   tensorflow::profiler::TraceMe activity(
+       "SetBindingPointers", tensorflow::profiler::TraceMeLevel::kInfo);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   const auto dtype = cuda_engine->getBindingDataType(binding_index);
++#else
++  const auto dtype = cuda_engine->getTensorDataType(tensor_name);
++#endif
+   VLOG(2) << "<<<<<<<<< SetupBindings with dtype = " << (int)dtype;
+   switch (dtype) {
+     case nvinfer1::DataType::kFLOAT:
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       buffers[binding_index] = const_cast<float*>(tensor.flat<float>().data());
++#else
++      execution_context->setTensorAddress(
++          tensor_name, const_cast<float*>(tensor.flat<float>().data()));
++#endif
+       break;
+     case nvinfer1::DataType::kHALF:
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       buffers[binding_index] =
+           const_cast<Eigen::half*>(tensor.flat<Eigen::half>().data());
++#else
++      execution_context->setTensorAddress(
++          tensor_name,
++          const_cast<Eigen::half*>(tensor.flat<Eigen::half>().data()));
++#endif
+       break;
+     case nvinfer1::DataType::kINT8:
+       return errors::Internal("INT8 inputs are not supported yet!");
+     case nvinfer1::DataType::kINT32:
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       buffers[binding_index] = const_cast<int32*>(tensor.flat<int32>().data());
++#else
++      execution_context->setTensorAddress(
++          tensor_name, const_cast<int32*>(tensor.flat<int32>().data()));
++#endif
+       break;
+ #if IS_TRT_VERSION_GE(8, 2, 0, 0)
+     case nvinfer1::DataType::kBOOL:
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       buffers[binding_index] = const_cast<bool*>(tensor.flat<bool>().data());
++#else
++      execution_context->setTensorAddress(
++          tensor_name, const_cast<bool*>(tensor.flat<bool>().data()));
++#endif
+       break;
+ #endif
+ #if IS_TRT_VERSION_GE(8, 5, 0, 0)
+     case nvinfer1::DataType::kUINT8:
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       buffers[binding_index] = const_cast<uint8*>(tensor.flat<uint8>().data());
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++      execution_context->setTensorAddress(
++          tensor_name, const_cast<uint8*>(tensor.flat<uint8>().data()));
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       break;
+ #endif
+ #if IS_TRT_VERSION_GE(8, 6, 0, 0)
+     case nvinfer1::DataType::kFP8:
+       return errors::Internal("FP8 inputs are not supported yet!");
+ #endif
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    case nvinfer1::DataType::kBF16:
++      return errors::Internal("BF16 inputs are not supported yet!");
++    case nvinfer1::DataType::kINT64:
++      return errors::Internal("INT64 inputs are not supported yet!");
++    case nvinfer1::DataType::kINT4:
++      return errors::Internal("INT4 inputs are not supported yet!");
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+     default:
+       return errors::Internal("Unknown TRT data type: ",
+                               static_cast<int>(dtype));
+@@ -124,8 +185,10 @@ Status SetupBindings(nvinfer1::ICudaEngine* cuda_engine, const Tensor& tensor,
+ Status SetTrtEngineInputs(nvinfer1::ICudaEngine* cuda_engine,
+                           nvinfer1::IExecutionContext* execution_context,
+                           const int trt_profile_idx,
+-                          std::vector<void*>& buffers, bool use_implicit_batch,
+-                          int num_batch,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                          std::vector<void*>& buffers,
++#endif
++                          bool use_implicit_batch, int num_batch,
+                           const TrtShapeOptimizationProfile& profiles,
+                           OpKernelContext* ctx, const DataVec* input_vec) {
+   tensorflow::profiler::TraceMe activity(
+@@ -143,6 +206,7 @@ Status SetTrtEngineInputs(nvinfer1::ICudaEngine* cuda_engine,
+ 
+     const string input_name =
+         ctx ? StrCat(IONamePrefixes::kInputPHName, i) : input_vec->at(i).name;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     int binding_index;
+     Status status = GetTrtBindingIndex(input_name.c_str(), trt_profile_idx,
+                                        cuda_engine, &binding_index);
+@@ -155,6 +219,7 @@ Status SetTrtEngineInputs(nvinfer1::ICudaEngine* cuda_engine,
+       VLOG(2) << "Skipping pruned input " << input_name;
+       continue;
+     }
++#endif  // !IS_TRT_VERSION_GE(10, 0, 0, 0)
+ 
+     if (use_implicit_batch && ctx) {
+       // Ensure all inputs have the same batch size
+@@ -168,16 +233,28 @@ Status SetTrtEngineInputs(nvinfer1::ICudaEngine* cuda_engine,
+     // Set known input dimensions. This is necessary because TRT network
+     // could be made with dynamic dimensions.
+     if (!use_implicit_batch) {
+-      TF_RETURN_IF_ERROR(profiles.SetInputShapeBinding(
+-          i, binding_index, cuda_engine, execution_context));
++      TF_RETURN_IF_ERROR(profiles.SetInputShapeBinding(i,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                                       binding_index,
++#else
++                                                       input_name.c_str(),
++#endif
++                                                       cuda_engine,
++                                                       execution_context));
+ 
+-      if (cuda_engine->isExecutionBinding(binding_index)) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++      if (cuda_engine->isExecutionBinding(binding_index))
++#else
++      if (true)
++#endif
++      {
+         tensorflow::profiler::TraceMe activity(
+             "SetTrtEngineInputs::setBindingDimensions",
+             tensorflow::profiler::TraceMeLevel::kInfo);
+         auto adap = DimsAdapter::Create(input_shape);
+         TRT_ENSURE_OK(adap);
+         nvinfer1::Dims trt_dims = adap->AsTrtDims();
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+         if (execution_context->getBindingDimensions(binding_index) !=
+             trt_dims) {
+           VLOG(2) << "Setting binding dimensions for idx " << binding_index;
+@@ -190,11 +267,30 @@ Status SetTrtEngineInputs(nvinfer1::ICudaEngine* cuda_engine,
+                 "Binding dimension does not fit selected profile.");
+           }
+         }
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++        if (execution_context->getTensorShape(input_name.c_str()) != trt_dims) {
++          VLOG(2) << "Setting binding dimensions for input " << input_name;
++          bool ret =
++              execution_context->setInputShape(input_name.c_str(), trt_dims);
++          if (!ret) {
++            VLOG(2) << "Error setting engine input " << input_name << " "
++                    << DebugString(trt_dims);
++            return errors::Internal(
++                "Binding dimension does not fit selected profile.");
++          }
++        }
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+       }
+     }
+     // Setup input bindings.
+     TF_RETURN_IF_ERROR(
+-        SetupBindings(cuda_engine, input_tensor, buffers, binding_index));
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++        SetupBindings(cuda_engine, input_tensor, buffers, binding_index)
++#else
++        SetupBindings(cuda_engine, execution_context, input_tensor,
++                      input_name.c_str())
++#endif
++    );
+   }
+ 
+   // Ensure all network dynamic dimensions (if any) are set in execution
+@@ -212,7 +308,10 @@ Status SetTrtEngineInputs(nvinfer1::ICudaEngine* cuda_engine,
+ 
+ Status SetTrtEngineOutputs(nvinfer1::ICudaEngine* cuda_engine,
+                            nvinfer1::IExecutionContext* execution_context,
+-                           int trt_profile_idx, std::vector<void*>& buffers,
++                           int trt_profile_idx,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                           std::vector<void*>& buffers,
++#endif
+                            bool use_implicit_batch, int batch_size,
+                            OpKernelContext* ctx, DataVec* outputs) {
+   tensorflow::profiler::TraceMe activity(
+@@ -222,15 +321,22 @@ Status SetTrtEngineOutputs(nvinfer1::ICudaEngine* cuda_engine,
+   for (int i = 0; i < n_outputs; i++) {
+     const string output_name =
+         ctx ? StrCat(IONamePrefixes::kOutputPHName, i) : outputs->at(i).name;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     int binding_index;
+     TF_RETURN_IF_ERROR(GetTrtBindingIndex(output_name.c_str(), trt_profile_idx,
+                                           cuda_engine, &binding_index));
++#endif
+ 
+     // Get TRT output shapes for allocating output memory.
+     TensorShape output_shape;
+     TF_RETURN_IF_ERROR(GetTrtBindingShape(cuda_engine, execution_context,
+-                                          binding_index, use_implicit_batch,
+-                                          batch_size, output_shape));
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                          binding_index,
++#else
++                                          output_name.c_str(),
++#endif
++                                          use_implicit_batch, batch_size,
++                                          output_shape));
+ 
+     // Allocate output tensor of TRTEngineOp.
+     Tensor* output_tensor = nullptr;
+@@ -255,23 +361,40 @@ Status SetTrtEngineOutputs(nvinfer1::ICudaEngine* cuda_engine,
+ 
+     // Set up output bindings.
+     TF_RETURN_IF_ERROR(
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+         SetupBindings(cuda_engine, *output_tensor, buffers, binding_index));
++#else
++        SetupBindings(cuda_engine, execution_context, *output_tensor,
++                      output_name.c_str()));
++#endif
+   }
+   return OkStatus();
+ }
+ 
+ Status TrtEnqueue(nvinfer1::IExecutionContext* execution_context,
+-                  std::vector<void*>& buffers, cudaStream_t stream,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                  std::vector<void*>& buffers,
++#endif
++                  cudaStream_t stream,
+                   bool use_implicit_batch, int batch_size) {
+   tensorflow::profiler::TraceMe activity(
+       "TrtEnqueue", tensorflow::profiler::TraceMeLevel::kInfo);
+   bool ret = false;
+   if (use_implicit_batch) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     ret = execution_context->enqueue(batch_size, &buffers[0], stream, nullptr);
+     VLOG(1) << "Called IExecutionContext::enqueue";
++#else
++    return errors::Internal("Implicit batch is not supported with TensorRT >=10");
++#endif
+   } else {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     ret = execution_context->enqueueV2(&buffers[0], stream, nullptr);
+     VLOG(1) << "Called IExecutionContext::enqueueV2";
++#else
++    ret = execution_context->enqueueV3(stream);
++    VLOG(1) << "Called IExecutionContext::enqueueV3";
++#endif
+   }
+   if (!ret) {
+     return errors::Internal("Failed to enqueue batch for TRT engine");
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.h b/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.h
+index b0935afb5b2..0b0293f02fe 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.h
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_engine_utils.h
+@@ -42,7 +42,10 @@ ExecutionContext CreateExecutionContext(nvinfer1::ICudaEngine* cuda_engine);
+ Status SetTrtEngineInputs(nvinfer1::ICudaEngine* cuda_engine,
+                           nvinfer1::IExecutionContext* execution_context,
+                           const int trt_profile_idx,
+-                          std::vector<void*>& buffers, bool use_implicit_batch,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                          std::vector<void*>& buffers,
++#endif
++                          bool use_implicit_batch,
+                           int num_batch,
+                           const TrtShapeOptimizationProfile& profiles,
+                           OpKernelContext* ctx = nullptr,
+@@ -63,7 +66,10 @@ Status GetTrtBindingShape(const nvinfer1::ICudaEngine* cuda_engine,
+ // the Tensors in outputs are already allocated.
+ Status SetTrtEngineOutputs(nvinfer1::ICudaEngine* cuda_engine,
+                            nvinfer1::IExecutionContext* execution_context,
+-                           int trt_profile_idx, std::vector<void*>& buffers,
++                           int trt_profile_idx,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                           std::vector<void*>& buffers,
++#endif
+                            bool use_implicit_batch, int batch_size = 0,
+                            OpKernelContext* ctx = nullptr,
+                            DataVec* outputs = nullptr);
+@@ -71,7 +77,10 @@ Status SetTrtEngineOutputs(nvinfer1::ICudaEngine* cuda_engine,
+ // Enqueues TensorRT inference job. The batch_size argument is only relevant in
+ // implicit batch mode.
+ Status TrtEnqueue(nvinfer1::IExecutionContext* execution_context,
+-                  std::vector<void*>& buffers, cudaStream_t stream,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                  std::vector<void*>& buffers,
++#endif
++                  cudaStream_t stream,
+                   bool use_implicit_batch, int batch_size = 1);
+ 
+ }  // namespace tensorrt
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_lru_cache.h b/tensorflow/compiler/tf2tensorrt/utils/trt_lru_cache.h
+index 31c3b9c9a90..b4269d24070 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_lru_cache.h
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_lru_cache.h
+@@ -120,16 +120,19 @@ class LRUCache {
+ 
+ struct EngineContext {
+   EngineContext() {}  // Creates an empty context.
+-  EngineContext(TrtUniquePtrType<nvinfer1::ICudaEngine>&& cuda_engine,
++  EngineContext(TrtUniquePtrType<nvinfer1::IRuntime> runtime,
++                TrtUniquePtrType<nvinfer1::ICudaEngine>&& cuda_engine,
+                 ExecutionContext&& execution_context)
+-      : cuda_engine_(std::move(cuda_engine)) {
++      : runtime_(std::move(runtime)), cuda_engine_(std::move(cuda_engine)) {
+     execution_contexts.push_back(std::move(execution_context));
+     device_memory_size_ =
+         cuda_engine_ ? cuda_engine_->getDeviceMemorySize() : 0;
+   }
+-  EngineContext(TrtUniquePtrType<nvinfer1::ICudaEngine>&& cuda_engine,
++  EngineContext(TrtUniquePtrType<nvinfer1::IRuntime> runtime,
++                TrtUniquePtrType<nvinfer1::ICudaEngine>&& cuda_engine,
+                 std::vector<ExecutionContext>&& execution_contexts)
+-      : cuda_engine_(std::move(cuda_engine)),
++      : runtime_(std::move(runtime)),
++        cuda_engine_(std::move(cuda_engine)),
+         execution_contexts(std::move(execution_contexts)) {
+     device_memory_size_ =
+         cuda_engine_ ? cuda_engine_->getDeviceMemorySize() : 0;
+@@ -137,6 +140,8 @@ struct EngineContext {
+ 
+   mutex mu;
+ 
++  nvinfer1::IRuntime* GetRuntime() { return runtime_.get(); }
++
+   nvinfer1::ICudaEngine* GetCudaEngine() { return cuda_engine_.get(); }
+ 
+   Status GetExecutionContext(int idx, nvinfer1::IExecutionContext** exec_ctx,
+@@ -160,6 +165,8 @@ struct EngineContext {
+   size_t GetDeviceMemorySize() { return device_memory_size_; }
+ 
+  private:
++  // Note: Must out-live the engine object.
++  TrtUniquePtrType<nvinfer1::IRuntime> runtime_;
+   // Note: declaration has to come before execution_contexts, to ensure proper
+   // order of destruction.
+   TrtUniquePtrType<nvinfer1::ICudaEngine> cuda_engine_;
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.cc b/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.cc
+index 57b222826b1..73b38c7032d 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.cc
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.cc
+@@ -431,12 +431,16 @@ void TrtShapeOptimizationProfile::SetShapeTensorMask(
+     const nvinfer1::ICudaEngine* engine, int n_inputs) {
+   is_shape_tensor_.resize(n_inputs, false);
+   for (int i = 0; i < n_inputs; i++) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     int binding_index;
+     Status status = GetTrtBindingIndex(i, 0, engine, &binding_index);
+     if (!status.ok()) {
+       continue;
+     }
+     is_shape_tensor_[i] = engine->isShapeBinding(binding_index);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++    is_shape_tensor_[i] = engine->isShapeInferenceIO(GetTrtInputName(i).c_str());
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+     if (is_shape_tensor_[i]) {
+       VLOG(2) << "Found shape tensor at " << i;
+     }
+@@ -516,7 +520,11 @@ Status TrtShapeOptimizationProfile::CreateExecutionContexts(
+       //   set optimizationprofiles.
+       // - The 0th profile is set implicitly for the first execution context
+       //   therefore we do not need to set.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       if (!context->setOptimizationProfile(i)) {
++#else
++      if (!context->setOptimizationProfileAsync(i, /*stream=*/0)) {
++#endif
+         return errors::Internal("Could not set TRT optimization profile.");
+       }
+     }
+@@ -528,24 +536,47 @@ Status TrtShapeOptimizationProfile::CreateExecutionContexts(
+ }
+ 
+ Status TrtShapeOptimizationProfile::SetInputShapeBinding(
+-    int input_index, int binding_index, nvinfer1::ICudaEngine* cuda_engine,
++    int input_index,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++    int binding_index,
++#else
++    const char* tensor_name,
++#endif
++    nvinfer1::ICudaEngine* cuda_engine,
+     nvinfer1::IExecutionContext* exec_context) const {
+   tensorflow::profiler::TraceMe activity(
+       "TrtShapeOptimizationProfile::SetInputShapeBinding",
+       tensorflow::profiler::TraceMeLevel::kInfo);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   if (cuda_engine->isShapeBinding(binding_index)) {
++#else
++  if (cuda_engine->isShapeInferenceIO(tensor_name)) {
++#endif
+     // Input shape binding data has to be in host memory. That is the reason
+     // we can't use input_tensor.flat().data(). which contains the same
+     // values in device memory. Instead, we use data that was copied to host
+     // by CollectShapeValues.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     VLOG(2) << "Setting input shape binding for idx " << binding_index
++#else
++    VLOG(2) << "Setting input shape binding for IO tensor " << tensor_name
++#endif
+             << ", with values "
+             << DebugString(actual_shape_values_.at(input_index));
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     bool ret = exec_context->setInputShapeBinding(
+         binding_index, actual_shape_values_.at(input_index).d);
++#else
++    bool ret = exec_context->setInputTensorAddress(
++        tensor_name, actual_shape_values_.at(input_index).d);
++#endif
+     if (!ret) {
+-      return errors::Internal("Could not set input shape binding for idx ",
+-                              binding_index);
++      return errors::Internal(
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++          "Could not set input shape binding for idx ", binding_index);
++#else
++          "Could not set input shape binding for tensor ", tensor_name);
++#endif
+     }
+   }
+   return OkStatus();
+@@ -553,16 +584,37 @@ Status TrtShapeOptimizationProfile::SetInputShapeBinding(
+ 
+ // If binding_idx is a shape tensor, then returns the associated min/max/opt
+ // shape values from prof_idx.
+-nvinfer1::Dims GetDimsFromShapeVal(int prof_idx, int binding_idx,
++nvinfer1::Dims GetDimsFromShapeVal(int prof_idx,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                                   int binding_idx,
++#else
++                                   const char* tensor_name,
++#endif
+                                    nvinfer1::OptProfileSelector selector,
+                                    const nvinfer1::ICudaEngine* engine) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   if (engine->isShapeBinding(binding_idx)) {
++#else
++  if (engine->isShapeInferenceIO(tensor_name)) {
++#endif
+     const int32* shape_val_ptr =
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+         engine->getProfileShapeValues(binding_idx, prof_idx, selector);
++#else
++        engine->getProfileTensorValues(tensor_name, prof_idx, selector);
++#endif
+     if (shape_val_ptr) {
+       VLOG(2) << "Found shape value in prof " << prof_idx << ", binding "
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+               << binding_idx;
++#else
++              << tensor_name;
++#endif
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       nvinfer1::Dims dims = engine->getBindingDimensions(binding_idx);
++#else
++      nvinfer1::Dims dims = engine->getTensorShape(tensor_name);
++#endif
+       // nbDims == 0 represent scalar, -1 represents invalid dim
+       int n_values = (dims.nbDims == 0) ? 1 : dims.d[0];
+       if (n_values > 0) {
+@@ -580,6 +632,7 @@ Status TrtShapeOptimizationProfile::SetPrunedMask(
+   is_pruned_input_.resize(n_network_inputs);
+   absl::c_fill(is_pruned_input_, false);
+   for (int j = 0; j < n_network_inputs; j++) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     int binding_idx;
+     Status status = GetTrtBindingIndex(j, 0, engine, &binding_idx);
+     if (!status.ok()) {
+@@ -590,6 +643,13 @@ Status TrtShapeOptimizationProfile::SetPrunedMask(
+       VLOG(2) << "Skipping pruned input " << j;
+       continue;
+     }
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++    if (engine->getTensorIOMode(GetTrtInputName(j).c_str()) ==
++        nvinfer1::TensorIOMode::kNONE) {
++      is_pruned_input_[j] = true;
++      VLOG(2) << "Skipping pruned input " << j;
++    }
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   }
+   return OkStatus();
+ }
+@@ -601,10 +661,12 @@ Status TrtShapeOptimizationProfile::RestoreProfiles(
+     // We do not need to restore profiles for an empty engine.
+     return OkStatus();
+   }
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   if (engine->hasImplicitBatchDimension()) {
+     // Nothing to do, we cannot have profiles in implicit batch mode.
+     return OkStatus();
+   }
++#endif
+   int n_profiles = engine->getNbOptimizationProfiles();
+   need_profiles_ = n_profiles > 0;
+   int n_inputs = GetNumberOfEngineInputs(engine);
+@@ -626,6 +688,7 @@ Status TrtShapeOptimizationProfile::RestoreProfiles(
+     // restore shape values
+     for (int j = 0; j < n_network_inputs; j++) {
+       if (is_pruned_input_[j]) continue;
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       int binding_idx;
+       TF_RETURN_IF_ERROR(GetTrtBindingIndex(j, 0, engine, &binding_idx));
+ 
+@@ -635,16 +698,36 @@ Status TrtShapeOptimizationProfile::RestoreProfiles(
+           binding_idx, prof_idx, nvinfer1::OptProfileSelector::kMAX);
+       nvinfer1::Dims opt = engine->getProfileDimensions(
+           binding_idx, prof_idx, nvinfer1::OptProfileSelector::kOPT);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++      string tensor_name = GetTrtInputName(j);
++
++      nvinfer1::Dims min = engine->getProfileShape(
++          tensor_name.c_str(), prof_idx, nvinfer1::OptProfileSelector::kMIN);
++      nvinfer1::Dims max = engine->getProfileShape(
++          tensor_name.c_str(), prof_idx, nvinfer1::OptProfileSelector::kMAX);
++      nvinfer1::Dims opt = engine->getProfileShape(
++          tensor_name.c_str(), prof_idx, nvinfer1::OptProfileSelector::kOPT);
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
++
+       cfg.min[j] = min;
+       cfg.max[j] = max;
+       cfg.opt[j] = opt;
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       cfg.min[j + n_inputs] = GetDimsFromShapeVal(
+           prof_idx, binding_idx, nvinfer1::OptProfileSelector::kMIN, engine);
+       cfg.max[j + n_inputs] = GetDimsFromShapeVal(
+           prof_idx, binding_idx, nvinfer1::OptProfileSelector::kMAX, engine);
+       cfg.opt[j + n_inputs] = GetDimsFromShapeVal(
+           prof_idx, binding_idx, nvinfer1::OptProfileSelector::kOPT, engine);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++      cfg.min[j + n_inputs] = GetDimsFromShapeVal(
++          prof_idx, tensor_name.c_str(), nvinfer1::OptProfileSelector::kMIN, engine);
++      cfg.max[j + n_inputs] = GetDimsFromShapeVal(
++          prof_idx, tensor_name.c_str(), nvinfer1::OptProfileSelector::kMAX, engine);
++      cfg.opt[j + n_inputs] = GetDimsFromShapeVal(
++          prof_idx, tensor_name.c_str(), nvinfer1::OptProfileSelector::kOPT, engine);
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+     }
+     VLOG(2) << "Restored profile " << cfg.DebugString();
+     profiles_.push_back(std::move(cfg));
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.h b/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.h
+index e2d8fdb655b..7d556c34d2e 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.h
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.h
+@@ -111,12 +111,48 @@ struct OptimizationProfileConfig {
+           int idx = i + n_inputs_tf;
+           VLOG(2) << "Setting shape values for " << name << ", "
+                   << ::tensorflow::tensorrt::DebugString(opt[idx]);
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+           profile->setShapeValues(name, nvinfer1::OptProfileSelector::kMIN,
+                                   min[idx].d, min[idx].nbDims);
+           profile->setShapeValues(name, nvinfer1::OptProfileSelector::kOPT,
+                                   opt[idx].d, opt[idx].nbDims);
+           profile->setShapeValues(name, nvinfer1::OptProfileSelector::kMAX,
+                                   max[idx].d, max[idx].nbDims);
++#else
++          std::vector<int32_t> vals32;
++          vals32.resize(min[idx].nbDims);
++          for (int dim = 0; dim < min[idx].nbDims; ++dim) {
++            vals32[dim] = static_cast<int32_t>(min[idx].d[dim]);
++            if (vals32[dim] != min[idx].d[dim]) {
++              return errors::Internal("min value does not fit in int32: ",
++                                      min[idx].d[dim]);
++            }
++          }
++          profile->setShapeValues(name, nvinfer1::OptProfileSelector::kMIN,
++                                  vals32.data(), min[idx].nbDims);
++
++          vals32.resize(opt[idx].nbDims);
++          for (int dim = 0; dim < opt[idx].nbDims; ++dim) {
++            vals32[dim] = static_cast<int32_t>(opt[idx].d[dim]);
++            if (vals32[dim] != opt[idx].d[dim]) {
++              return errors::Internal("opt value does not fit in int32: ",
++                                      opt[idx].d[dim]);
++            }
++          }
++          profile->setShapeValues(name, nvinfer1::OptProfileSelector::kOPT,
++                                  vals32.data(), opt[idx].nbDims);
++
++          vals32.resize(max[idx].nbDims);
++          for (int dim = 0; dim < max[idx].nbDims; ++dim) {
++            vals32[dim] = static_cast<int32_t>(max[idx].d[dim]);
++            if (vals32[dim] != max[idx].d[dim]) {
++              return errors::Internal("max value does not fit in int32: ",
++                                      max[idx].d[dim]);
++            }
++          }
++          profile->setShapeValues(name, nvinfer1::OptProfileSelector::kMAX,
++                                  vals32.data(), max[idx].nbDims);
++#endif
+         }
+         VLOG(2) << "Setting input dimensions for " << name << ", "
+                 << ::tensorflow::tensorrt::DebugString(opt[i]);
+@@ -241,7 +277,12 @@ class TrtShapeOptimizationProfile {
+   Status CreateExecutionContexts(nvinfer1::ICudaEngine* engine,
+                                  std::vector<ExecutionContext>* exec_contexts);
+ 
+-  Status SetInputShapeBinding(int input_index, int binding_index,
++  Status SetInputShapeBinding(int input_index,
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
++                              int binding_index,
++#else
++                              const char* tensor_name,
++#endif
+                               nvinfer1::ICudaEngine* cuda_engine,
+                               nvinfer1::IExecutionContext* exec_context) const;
+ 
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles_test.cc b/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles_test.cc
+index 87e17a9fc3f..a4d53b683e4 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles_test.cc
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles_test.cc
+@@ -77,13 +77,21 @@ class TrtShapeOptimizationProfileTest
+  protected:
+   TrtShapeOptimizationProfileTest() {
+     strategy_ = GetParam();
++#if IS_TRT_VERSION_GE(10, 0, 0, 0)
++    runtime_.reset(nvinfer1::createInferRuntime(logger_));
++#endif
+     builder_ = TrtUniquePtrType<nvinfer1::IBuilder>(
+         nvinfer1::createInferBuilder(logger_));
+     network_ = TrtUniquePtrType<nvinfer1::INetworkDefinition>(
+         builder_->createNetworkV2(flags_));
+     builder_config_ = TrtUniquePtrType<nvinfer1::IBuilderConfig>(
+         builder_->createBuilderConfig());
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+     builder_config_->setMaxWorkspaceSize(1 << 10);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++    builder_config_->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,
++                                        1 << 10);
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   }
+ 
+   // Defines a simple network: output = input1 + input2.
+@@ -117,12 +125,24 @@ class TrtShapeOptimizationProfileTest
+     int prof_idx = exec_contexts_[idx]->getOptimizationProfile();
+     ASSERT_GE(prof_idx, 0);
+     for (int j = 0; j < dimvec.size(); j++) {
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+       nvinfer1::Dims min = engine->getProfileDimensions(
+           j, prof_idx, nvinfer1::OptProfileSelector::kMIN);
+       nvinfer1::Dims max = engine->getProfileDimensions(
+           j, prof_idx, nvinfer1::OptProfileSelector::kMAX);
+       nvinfer1::Dims opt = engine->getProfileDimensions(
+           j, prof_idx, nvinfer1::OptProfileSelector::kOPT);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++      nvinfer1::Dims min =
++          engine->getProfileShape(engine->getIOTensorName(j), prof_idx,
++                                  nvinfer1::OptProfileSelector::kMIN);
++      nvinfer1::Dims max =
++          engine->getProfileShape(engine->getIOTensorName(j), prof_idx,
++                                  nvinfer1::OptProfileSelector::kMAX);
++      nvinfer1::Dims opt =
++          engine->getProfileShape(engine->getIOTensorName(j), prof_idx,
++                                  nvinfer1::OptProfileSelector::kOPT);
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+ 
+       // This should always hold.
+       EXPECT_TRUE(DimsContained(dimvec[j], min, max));
+@@ -135,6 +155,7 @@ class TrtShapeOptimizationProfileTest
+   }
+ 
+   Logger& logger_ = *Logger::GetLogger();
++  TrtUniquePtrType<nvinfer1::IRuntime> runtime_;
+   TrtUniquePtrType<nvinfer1::IBuilder> builder_;
+   TrtUniquePtrType<nvinfer1::INetworkDefinition> network_;
+   TrtUniquePtrType<nvinfer1::IBuilderConfig> builder_config_;
+@@ -168,8 +189,16 @@ TEST_P(TrtShapeOptimizationProfileTest, Static) {
+   TF_CHECK_OK(profile.ConfigureBuilder(builder_.get(), builder_config_.get(),
+                                        network_.get()));
+ 
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   engine = TrtUniquePtrType<nvinfer1::ICudaEngine>(
+       builder_->buildEngineWithConfig(*network_, *builder_config_));
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  TrtUniquePtrType<nvinfer1::IHostMemory> serialized(
++      builder_->buildSerializedNetwork(*network_, *builder_config_));
++  engine.reset(
++      runtime_->deserializeCudaEngine(serialized->data(), serialized->size()));
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
++
+   EXPECT_NE(nullptr, engine);
+   TF_CHECK_OK(profile.CreateExecutionContexts(engine.get(), &exec_contexts_));
+   // A single execution context should be created for a graph with static input.
+@@ -213,8 +242,16 @@ TEST_P(TrtShapeOptimizationProfileTest, Dynamic) {
+   // Configure and build engine.
+   TF_CHECK_OK(profile.ConfigureBuilder(builder_.get(), builder_config_.get(),
+                                        network_.get()));
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   engine = TrtUniquePtrType<nvinfer1::ICudaEngine>(
+       builder_->buildEngineWithConfig(*network_.get(), *builder_config_.get()));
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  TrtUniquePtrType<nvinfer1::IHostMemory> serialized(
++      builder_->buildSerializedNetwork(*network_.get(),
++                                       *builder_config_.get()));
++  engine.reset(
++      runtime_->deserializeCudaEngine(serialized->data(), serialized->size()));
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   ASSERT_NE(nullptr, engine);
+ 
+   TF_CHECK_OK(profile.CreateExecutionContexts(engine.get(), &exec_contexts_));
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_testutils.h b/tensorflow/compiler/tf2tensorrt/utils/trt_testutils.h
+index e0b9a0366a5..bbbe9512a5c 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_testutils.h
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_testutils.h
+@@ -83,7 +83,7 @@ nvinfer1::Dims CreateDims(const std::vector<int>& d);
+ // matches nvinfer1::Dims to initializer list or vector of ints
+ // Example: EXPECT_THAT(my_dims, DimsAreArray({1, 2, 3}))
+ MATCHER_P(DimsAreArrayHelper, array_value,
+-          absl::StrFormat("%s [%s]", negation ? "are" : "are not",
++          absl::StrFormat("%s [%s]", negation ? "are not" : "are",
+                           ::testing::PrintToString(array_value))) {
+   if (arg.nbDims != array_value.size()) return false;
+   for (int i = 0; i < arg.nbDims; ++i) {
+@@ -100,7 +100,7 @@ using DimsAreArray = DimsAreArrayHelperMatcherP<std::vector<int>>;
+ // Checks that layer names are equal to initializer list or vector of strings.
+ // Example: EXPECT_THAT(my_network, LayerNamesAreArray({"conv1", "conv2"}))
+ MATCHER_P(LayerNamesAreArrayHelper, array_value,
+-          absl::StrFormat("layer names %s [%s]", negation ? "are" : "are not",
++          absl::StrFormat("layer names %s [%s]", negation ? "are not" : "are",
+                           ::testing::PrintToString(array_value))) {
+   if (array_value.size() != arg->getNbLayers()) return false;
+   for (int i = 0; i < arg->getNbLayers(); ++i) {
+diff --git a/tensorflow/compiler/tf2tensorrt/utils/trt_testutils_test.cc b/tensorflow/compiler/tf2tensorrt/utils/trt_testutils_test.cc
+index d5d9fcf99f5..8a442478349 100644
+--- a/tensorflow/compiler/tf2tensorrt/utils/trt_testutils_test.cc
++++ b/tensorflow/compiler/tf2tensorrt/utils/trt_testutils_test.cc
+@@ -77,7 +77,14 @@ TEST(INetworkDefinitionMatchers, CorrectlyMatch) {
+   ASSERT_NE(input, nullptr);
+ 
+   const char* fc_layer_name = "my-fc-layer";
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   auto layer = network->addFullyConnected(*input, 1, weights, weights);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  auto layer =
++      network->addMatrixMultiply(*input, nvinfer1::MatrixOperation::kNONE,
++                                 *input, nvinfer1::MatrixOperation::kNONE);
++  (void)weights;  // Not used
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   ASSERT_NE(layer, nullptr);
+   layer->setName(fc_layer_name);
+ 
+@@ -86,7 +93,12 @@ TEST(INetworkDefinitionMatchers, CorrectlyMatch) {
+               AllOf(LayerNamesNonEmpty(), LayerNamesAreArray({fc_layer_name})));
+ 
+   // Add layer with default name and check layer name.
++#if !IS_TRT_VERSION_GE(10, 0, 0, 0)
+   layer = network->addFullyConnected(*input, 1, weights, weights);
++#else   // IS_TRT_VERSION_GE(10, 0, 0, 0)
++  layer = network->addMatrixMultiply(*input, nvinfer1::MatrixOperation::kNONE,
++                                     *input, nvinfer1::MatrixOperation::kNONE);
++#endif  // IS_TRT_VERSION_GE(10, 0, 0, 0)
+   EXPECT_THAT(network.get(), AllOf(LayerNamesNonEmpty(),
+                                    Not(LayerNamesAreArray({fc_layer_name}))));
+ }
+diff --git a/tensorflow/lite/python/convert.py b/tensorflow/lite/python/convert.py
+index cfaff27a849..a4eeb02fd6a 100644
+--- a/tensorflow/lite/python/convert.py
++++ b/tensorflow/lite/python/convert.py
+@@ -14,7 +14,6 @@
+ # ==============================================================================
+ """Converts a frozen graph into a TFLite FlatBuffer."""
+ 
+-import distutils.spawn
+ import enum
+ import hashlib
+ import os as _os
+@@ -45,6 +44,10 @@ from tensorflow.python.platform import resource_loader as _resource_loader
+ from tensorflow.python.util import deprecation
+ from tensorflow.python.util.tf_export import tf_export as _tf_export
+ 
++try:
++  from shutil import which
++except ImportError:
++  from distutils.spawn import find_executable as which
+ 
+ def _is_quantized_input_stats_required(
+     conversion_flags: _conversion_flags_pb2.TocoFlags,
+@@ -399,7 +402,7 @@ def _run_deprecated_conversion_binary(
+     RuntimeError: When conversion fails, an exception is raised with the error
+       message embedded.
+   """
+-  if distutils.spawn.find_executable(_deprecated_conversion_binary) is None:
++  if which(_deprecated_conversion_binary) is None:
+     raise ConverterError("""Could not find `toco_from_protos` binary, make sure
+ your virtualenv bin directory or pip local bin directory is in your path.
+ In particular, if you have installed TensorFlow with --user, make sure you
+diff --git a/tensorflow/python/compiler/tensorrt/test/tf_trt_integration_test_base.py b/tensorflow/python/compiler/tensorrt/test/tf_trt_integration_test_base.py
+index 06784c09106..8290ec796ef 100644
+--- a/tensorflow/python/compiler/tensorrt/test/tf_trt_integration_test_base.py
++++ b/tensorflow/python/compiler/tensorrt/test/tf_trt_integration_test_base.py
+@@ -1117,7 +1117,7 @@ def _GetTestConfigsV1():
+   convert_online, convert_offline = True, False
+   dynamic_engine, static_engine = True, False
+   use_calibration, no_calibration = True, False
+-  implicit_batch = False
++  dynamic_shape = False
+ 
+   # Add all possible test cases and let the derived test class to decide
+   # whether to run specific ones with ShouldRunTest().
+@@ -1126,11 +1126,11 @@ def _GetTestConfigsV1():
+   opts = list(
+       itertools.product([FP32, FP16, INT8], [convert_online, convert_offline],
+                         [dynamic_engine, static_engine], [no_calibration],
+-                        [implicit_batch]))
++                        [dynamic_shape]))
+   # We always run calibration with offline tool.
+   # TODO(aaroey): static calibration engine is not supported yet.
+   opts.append(
+-      (INT8, convert_offline, dynamic_engine, use_calibration, implicit_batch))
++      (INT8, convert_offline, dynamic_engine, use_calibration, dynamic_shape))
+   return opts
+ 
+ 
+@@ -1142,6 +1142,11 @@ def _GetTestConfigsV2():
+   # TODO(laigd): add support for calibration.
+   no_calibration = False
+   use_calibration = True
++  dynamic_shape_opts = [False, True]
++
++  if trt_utils.is_loaded_tensorrt_version_greater_equal(10, 0, 0):
++    # Implicit batch mode is not supported since TensorRT 10.0.
++    dynamic_shape_opts = [True]
+ 
+   # Add all possible test cases and let the derived test class to decide
+   # whether to run specific ones with ShouldRunTest().
+@@ -1154,10 +1159,11 @@ def _GetTestConfigsV2():
+   # - INT8 without calibration behaves like FP32/FP16.
+   opts = list(
+       itertools.product([FP32, FP16], [convert_offline], [dynamic_engine],
+-                        [no_calibration], [False, True]))
++                        [no_calibration], dynamic_shape_opts))
+   # We always run calibration with offline tool.
+-  opts.append((INT8, convert_offline, dynamic_engine, use_calibration, False))
+-  opts.append((INT8, convert_offline, dynamic_engine, use_calibration, True))
++  for dynamic_shape in dynamic_shape_opts:
++    opts.append((
++        INT8, convert_offline, dynamic_engine, use_calibration, dynamic_shape))
+   return opts
+ 
+ 
+diff --git a/tensorflow/python/compiler/tensorrt/trt_convert.py b/tensorflow/python/compiler/tensorrt/trt_convert.py
+index 746f910e407..5fab7b0273b 100644
+--- a/tensorflow/python/compiler/tensorrt/trt_convert.py
++++ b/tensorflow/python/compiler/tensorrt/trt_convert.py
+@@ -1214,7 +1214,7 @@ class TrtGraphConverterV2(object):
+       input_saved_model_signature_key: the key of the signature to optimize the
+         graph for.
+       use_dynamic_shape: whether to enable dynamic shape support. None is
+-        equivalent to False in the current implementation.
++        equivalent to True in the current implementation.
+       dynamic_shape_profile_strategy: one of the strings in
+         supported_profile_strategies(). None is equivalent to Range in the
+         current implementation.
+@@ -1284,7 +1284,7 @@ class TrtGraphConverterV2(object):
+     self._calibrated = False
+ 
+     if use_dynamic_shape is None:
+-      self._use_dynamic_shape = False
++      self._use_dynamic_shape = True
+     else:
+       self._use_dynamic_shape = use_dynamic_shape
+ 
+diff --git a/third_party/tensorrt/tensorrt_configure.bzl b/third_party/tensorrt/tensorrt_configure.bzl
+index 3d127795638..28c222ab8ad 100644
+--- a/third_party/tensorrt/tensorrt_configure.bzl
++++ b/third_party/tensorrt/tensorrt_configure.bzl
+@@ -26,7 +26,7 @@ _TF_TENSORRT_VERSION = "TF_TENSORRT_VERSION"
+ _TF_NEED_TENSORRT = "TF_NEED_TENSORRT"
+ 
+ _TF_TENSORRT_LIBS = ["nvinfer", "nvinfer_plugin"]
+-_TF_TENSORRT_HEADERS = ["NvInfer.h", "NvUtils.h", "NvInferPlugin.h"]
++_TF_TENSORRT_HEADERS = ["NvInfer.h", "NvInferPlugin.h"]
+ _TF_TENSORRT_HEADERS_V6 = [
+     "NvInfer.h",
+     "NvUtils.h",
+@@ -63,6 +63,21 @@ _TF_TENSORRT_HEADERS_V8_6 = [
+     "NvInferVersion.h",
+     "NvUtils.h",
+ ]
++_TF_TENSORRT_HEADERS_V10 = [
++    "NvInfer.h",
++    "NvInferConsistency.h",
++    "NvInferConsistencyImpl.h",
++    "NvInferImpl.h",
++    "NvInferLegacyDims.h",
++    "NvInferPlugin.h",
++    "NvInferPluginUtils.h",
++    "NvInferRuntime.h",
++    "NvInferRuntimeBase.h",
++    "NvInferRuntimeCommon.h",
++    "NvInferRuntimePlugin.h",
++    "NvInferSafeRuntime.h",
++    "NvInferVersion.h",
++]
+ 
+ _DEFINE_TENSORRT_SONAME_MAJOR = "#define NV_TENSORRT_SONAME_MAJOR"
+ _DEFINE_TENSORRT_SONAME_MINOR = "#define NV_TENSORRT_SONAME_MINOR"
+@@ -89,6 +104,8 @@ def _at_least_version(actual_version, required_version):
+     return actual >= required
+ 
+ def _get_tensorrt_headers(tensorrt_version):
++    if _at_least_version(tensorrt_version, "10"):
++        return _TF_TENSORRT_HEADERS_V10
+     if _at_least_version(tensorrt_version, "8.6"):
+         return _TF_TENSORRT_HEADERS_V8_6
+     if _at_least_version(tensorrt_version, "8"):
+diff --git a/third_party/xla/third_party/tsl/third_party/tensorrt/tensorrt_configure.bzl b/third_party/xla/third_party/tsl/third_party/tensorrt/tensorrt_configure.bzl
+index 91b214fd990..d63828fd29b 100644
+--- a/third_party/xla/third_party/tsl/third_party/tensorrt/tensorrt_configure.bzl
++++ b/third_party/xla/third_party/tsl/third_party/tensorrt/tensorrt_configure.bzl
+@@ -26,7 +26,7 @@ _TF_TENSORRT_VERSION = "TF_TENSORRT_VERSION"
+ _TF_NEED_TENSORRT = "TF_NEED_TENSORRT"
+ 
+ _TF_TENSORRT_LIBS = ["nvinfer", "nvinfer_plugin"]
+-_TF_TENSORRT_HEADERS = ["NvInfer.h", "NvUtils.h", "NvInferPlugin.h"]
++_TF_TENSORRT_HEADERS = ["NvInfer.h", "NvInferPlugin.h"]
+ _TF_TENSORRT_HEADERS_V6 = [
+     "NvInfer.h",
+     "NvUtils.h",

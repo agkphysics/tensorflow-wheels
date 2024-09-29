@@ -7,6 +7,16 @@ optimised TensorFlow wheel with TensorRT support.
 
 Each release page also has the checksums of the attached files.
 
+## `manylinux_2_28_x86_64` wheels
+The following wheels were compiles in the `manylinux_2_28_x86_64`
+container described below. These are required to have more recent CUDA
+compatibility since Nvidia stopped releasing updates for CentOS 7 based
+releases.
+
+| TF | Python | GPU | CUDA | cuDNN | AVX2 | MKL/oneDNN | TensorRT | Links |
+|-|-|-|-|-|-|-|-|-|
+| 2.16.2 | 3.9-3.12 | 5.2-9.0 | 12.6 | 9.4 | :heavy_check_mark: | :heavy_check_mark: | 10.4 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_gpu_cuda12.6_cudnn9.4_avx2_mkl_trt10.4) |
+
 ## `manylinux2014_x86_64` wheels
 The following wheels were compiled in the `manylinux2014_x86_64`
 container described below. These should have better glibc
@@ -39,14 +49,13 @@ The following wheels were compiled on an Ubuntu 20.04 system
 | 1.15.0 | 3.8 | 7.x | 10.2 | 7 | :heavy_check_mark: | :heavy_check_mark: | 6 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_1.15.0_gpu_cm7x_cuda102_cudnn7_avx2_mkl_trt6) |
 | 1.14.1 | 3.8 | 7.x | 10.2 | 7 | :heavy_check_mark: | :heavy_check_mark: | 6 | [Release](https://github.com/agkphysics/tensorflow-wheels/releases/tag/tf_1.14.1_gpu_cm7x_cuda102_cudnn7_avx2_mkl_trt6) |
 
-## `manylinux2014_x86_64` Docker container
-The [Dockerfile](./docker/Dockerfile) is based on `manylinux2014_x86_64`
-and can be built with the following command, from within the `docker/`
-directory:
+## Docker containers
+The Dockerfiles under `docker/` are based on `manylinux*` and can be
+built with the following command, from within the `docker/` directory:
 ```
-docker build -t tf_build .
+docker build -t tf_build -f Dockerfile.<manylinux_ver> .
 ```
-The container can be run like so:
+The container can then be run like so:
 ```
 docker run --gpus all -it --rm --tmpfs /tmp:exec -v /path/to/tensorflow:/build -u $(id -u):$(id -g) -e USER=$(id -u) tf_build
 ```
@@ -54,7 +63,7 @@ docker run --gpus all -it --rm --tmpfs /tmp:exec -v /path/to/tensorflow:/build -
 Then, you can run the build script:
 ```
 cd /path/to/tensorflow
-bash build-tf2-gpu-avx2-mkl.sh -p 11
+bash build-tf2-gpu-avx2-mkl.sh -p 12
 ```
 
 The other scripts assume a directory structure as follows:
@@ -62,8 +71,10 @@ The other scripts assume a directory structure as follows:
 .../
     tensorflow/
         build-tf2-gpu-avx2-mkl.sh
-    keras/
-        build-keras.sh
+    text/
+        build-text.sh
+    io/
+        build-io.sh
     wheels/
         tensorflow/
             *.whl

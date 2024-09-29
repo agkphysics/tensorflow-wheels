@@ -1,0 +1,40 @@
+diff --git a/WORKSPACE b/WORKSPACE
+index 3ac6e5c..a458efb 100644
+--- a/WORKSPACE
++++ b/WORKSPACE
+@@ -58,10 +58,9 @@ http_archive(
+     name = "org_tensorflow",
+     patch_args = ["-p1"],
+     patches = ["//third_party/tensorflow:tf.patch"],
+-    strip_prefix = "tensorflow-2.16.1",
+-    sha256 = "54c976f828182f85e10e03840dd3b0504109f57760a498075574e35e9aa983fe",
++    strip_prefix = "tensorflow-810f233968cec850915324948bbbc338c97cf57f",
+     urls = [
+-        "https://github.com/tensorflow/tensorflow/archive/v2.16.1.zip"
++        "https://github.com/tensorflow/tensorflow/archive/810f233968cec850915324948bbbc338c97cf57f.zip"
+     ],
+ )
+ 
+diff --git a/oss_scripts/pip_package/setup.nightly.py b/oss_scripts/pip_package/setup.nightly.py
+index d3a00b6..67cd584 100644
+--- a/oss_scripts/pip_package/setup.nightly.py
++++ b/oss_scripts/pip_package/setup.nightly.py
+@@ -32,7 +32,7 @@ from setuptools.command.install import install
+ from setuptools.dist import Distribution
+ 
+ project_name = 'tensorflow-text-nightly'
+-project_version = 'REPLACE_ME'
++project_version = '2.16.2'
+ 
+ 
+ class BinaryDistribution(Distribution):
+diff --git a/tensorflow_text/__init__.py b/tensorflow_text/__init__.py
+index 76f52fb..81928d4 100644
+--- a/tensorflow_text/__init__.py
++++ b/tensorflow_text/__init__.py
+@@ -110,4 +110,4 @@ tflite_registrar.SELECT_TFTEXT_OPS = [
+ ]
+ 
+ remove_undocumented(__name__, _allowed_symbols)
+-__version__ = "2.16.1"
++__version__ = "2.16.2"

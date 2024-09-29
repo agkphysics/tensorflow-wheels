@@ -1,0 +1,12 @@
+FROM quay.io/pypa/manylinux_2_28_x86_64
+
+RUN dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo \
+	&& dnf clean all \
+	&& dnf -y install cuda-toolkit-12-6 libcudnn9-devel tensorrt-devel libnccl-devel clang libtirpc-devel
+RUN curl -L "https://github.com/bazelbuild/bazelisk/releases/download/v1.21.0/bazelisk-linux-amd64" -o /usr/local/bin/bazel \
+	&& chmod +x /usr/local/bin/bazel \
+	&& echo "startup --output_user_root=/tmp/bazel" > /etc/bazel.bazelrc
+ENV BAZELISK_HOME=/tmp/bazelisk USER=build
+ 
+WORKDIR /build
+CMD ["/bin/bash"]
